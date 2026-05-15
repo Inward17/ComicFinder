@@ -1,13 +1,27 @@
-# API Keys and configuration
-config.js
+# Dependencies
+node_modules/
+package-lock.json
+
+# Environment & Secrets
 .env
+config.js
 
-# MacOS
+# Cache
+.cache.json
+.cache.json.lock
+
+# Legacy & internal planning docs
+comicfinder.html
+MangaFinder_ImprovementPlan.docx
+improvement_plan.txt
+
+# OS files
 .DS_Store
+Thumbs.db
 
-# Editor directories and files
-.idea
-.vscode
+# Editor directories
+.idea/
+.vscode/
 *.suo
 *.ntvs*
 *.njsproj

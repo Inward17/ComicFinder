@@ -24,10 +24,12 @@
     </button>
   </div>
 
-  <div class="api-notice" id="apiNotice">
-    <strong>⚠️ API Key Required</strong>
-    Please insert your new Gemini API key in the code.
+  <div class="nav-tabs">
+    <button class="nav-tab active" id="tabSearch"><i class="ti ti-search"></i> Search</button>
+    <button class="nav-tab" id="tabBookmarks"><i class="ti ti-bookmark"></i> Watchlist <span id="bookmarkCount" class="badge-count" style="display:none">0</span></button>
   </div>
+
+  <div id="searchView">
 
   <div class="search-row">
     <input type="text" id="inp" placeholder="e.g. Solo Leveling, One Piece..." autocomplete="off" />
@@ -39,14 +41,22 @@
   <div class="status" id="status"></div>
   <div id="results"></div>
 
-  <div class="history" id="historySection" style="display:none">
-    <div class="history-title">Recent Searches</div>
-    <div id="historyChips"></div>
+    <div class="history" id="historySection" style="display:none">
+      <div class="history-title">Recent Searches</div>
+      <div id="historyChips"></div>
+    </div>
+  </div> <!-- End searchView -->
+
+  <div id="bookmarksView" style="display:none">
+    <div class="bookmarks-header">
+      <h2>My Watchlist</h2>
+      <button id="checkAllBtn" class="btn-check-all"><i class="ti ti-refresh"></i> Check All Updates</button>
+    </div>
+    <div id="bookmarksGrid" class="bookmarks-grid"></div>
   </div>
 
 </div>
 
-<script src="config.js"></script>
 <script src="script.js"></script>
 </body>
 </html>

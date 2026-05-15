@@ -1,0 +1,36 @@
+{
+  "name": "mangafinder-pro",
+  "version": "2.0.0",
+  "description": "A smart web application to find the best English reading sites for any manga, manhwa, or manhua. Powered by Google Gemini 2.5 with MangaDex metadata, intelligent caching, and a local watchlist.",
+  "main": "backend/server.js",
+  "scripts": {
+    "start": "node backend/server.js",
+    "dev": "node backend/server.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Inward17/ComicFinder.git"
+  },
+  "keywords": [
+    "manga",
+    "manhwa",
+    "manhua",
+    "reader",
+    "finder",
+    "gemini",
+    "ai"
+  ],
+  "author": "Inward17",
+  "license": "MIT",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/Inward17/ComicFinder/issues"
+  },
+  "homepage": "https://github.com/Inward17/ComicFinder#readme",
+  "dependencies": {
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "proper-lockfile": "^4.1.2"
+  }
+}
