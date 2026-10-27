@@ -4,6 +4,8 @@ const cacheService = require('./cacheService');
 
 // Built-in fetch is available in Node.js 18+
 
+const GEMINI_TIMEOUT_MS = 60 * 1000; // Grounded search routinely takes 10-30s
+
 /**
  * Searches Gemini for candidate links and runs them through the fallback chain
  * @param {string} query 
@@ -46,15 +48,16 @@ async function searchManga(query, forceRefresh = false) {
   
   Do not include any introductory text or explanations.`;
 
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${API_KEY}`;
-  
+  const endpoint = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
+
   try {
     const resp = await fetch(endpoint, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "x-goog-api-key": API_KEY },
+      signal: AbortSignal.timeout(GEMINI_TIMEOUT_MS),
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
-        tools: [{ googleSearch: {} }], 
+        tools: [{ googleSearch: {} }],
         generationConfig: { temperature: 0.2 }
       })
     });
@@ -62,8 +65,14 @@ async function searchManga(query, forceRefresh = false) {
     const data = await resp.json();
     if (data.error) throw new Error(data.error.message);
 
-    let textResponse = data.candidates[0].content.parts[0].text;
-    
+    // Grounded responses can be split across several parts; a safety block returns no content at all.
+    const candidate = data.candidates && data.candidates[0];
+    const parts = (candidate && candidate.content && candidate.content.parts) || [];
+    let textResponse = parts.map(p => p.text || '').join('');
+    if (!textResponse) {
+      throw new Error(`Gemini returned no content${candidate && candidate.finishReason ? ` (${candidate.finishReason})` : ''}`);
+    }
+
     // Extract JSON array
     const jsonStart = textResponse.indexOf('[');
     const jsonEnd = textResponse.lastIndexOf(']');
@@ -72,6 +81,7 @@ async function searchManga(query, forceRefresh = false) {
     }
 
     const candidates = JSON.parse(textResponse);
+    if (!Array.isArray(candidates)) throw new Error('Gemini did not return a JSON array');
 
     // Fallback Chain Logic
     // Validate candidates concurrently
