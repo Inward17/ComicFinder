@@ -34,6 +34,8 @@ mangafinder-pro/
 │       ├── geminiService.js   # Gemini API orchestration + cache integration
 │       ├── validationService.js # Link health checks, Unicode detection, SSRF guard
 │       ├── mangadexService.js # MangaDex title normalization & metadata
+│       ├── siteFamilyService.js # Direct lookups on aggregator sites (slug guess + search fallback)
+│       ├── firecrawlService.js # Optional Firecrawl client for Cloudflare-protected pages
 │       └── cacheService.js    # File-based JSON cache with lockfile safety
 ├── public/                    # Only this folder is served statically
 │   ├── index.html             # Main UI
@@ -81,6 +83,7 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 | Variable | Required | Description |
 |---|---|---|
 | `GEMINI_API_KEY` | ✅ | Your Google Gemini API key from [AI Studio](https://aistudio.google.com/app/apikey) |
+| `FIRECRAWL_API_KEY` | Optional | [Firecrawl](https://www.firecrawl.dev) key. Unlocks Cloudflare-protected aggregator sites and verifies Cloudflare-blocked links (about 1–3 credits per uncached search). Without it, only plain fetch is used. |
 
 ---
 
@@ -104,9 +107,10 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 2. **MangaDex API** normalizes the title and fetches metadata (cover, synopsis, tags, chapter count).
 3. **Backend cache** is checked — if a valid result exists (< 24h old), it's returned instantly.
 4. On cache miss, **Gemini 2.5** searches the web for reading sites and returns structured JSON.
-5. **Validation service** checks each link for liveness, correct language, and Cloudflare blocks.
-6. Results are returned to the frontend with a `fromCache` flag so the UI can show a cache notice.
-7. Users can **bookmark** manga to a local watchlist and check for new chapters later.
+5. **Validation service** checks each link for liveness and correct language; Cloudflare-blocked pages are re-checked through Firecrawl when a key is set.
+6. **Site lookups** run in parallel: known aggregator sites are queried directly by guessed slug (free), falling back to their search page via Firecrawl.
+7. Results are returned to the frontend with a `fromCache` flag so the UI can show a cache notice.
+8. Users can **bookmark** manga to a local watchlist and check for new chapters later.
 
 ---
 
