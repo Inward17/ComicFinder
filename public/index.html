@@ -1,62 +1,79 @@
-
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#f6f4ef" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#0e0d0c" media="(prefers-color-scheme: dark)" />
   <title>MangaFinder Pro</title>
+  <script>
+    // Apply the saved (or system) theme before first paint to avoid a light flash
+    try {
+      var t = JSON.parse(localStorage.getItem('mangafinder.v1') || '{}').theme;
+      if (t === 'dark' || (!t && matchMedia('(prefers-color-scheme: dark)').matches)) {
+        document.documentElement.dataset.theme = 'dark';
+      }
+    } catch (e) {}
+  </script>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css" />
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;500;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-<div class="container">
 
-  <div class="header-top">
-    <div class="header">
-      <h1>MANGA<span>FINDER</span> PRO</h1>
-      <p>Powered by Gemini 2.5 — Smart Search & Caching</p>
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="brand" href="/" aria-label="MangaFinder Pro home">MANGA<span>FINDER</span></a>
+    <nav class="tabs" aria-label="Views">
+      <button class="tab active" id="tabSearch" aria-current="page"><i class="ti ti-search" aria-hidden="true"></i> Search</button>
+      <button class="tab" id="tabBookmarks">
+        <i class="ti ti-bookmark" aria-hidden="true"></i> Watchlist
+        <span id="bookmarkCount" class="count" hidden>0</span>
+      </button>
+    </nav>
+    <button class="icon-btn" id="themeBtn" aria-label="Toggle dark mode"><i class="ti ti-moon" aria-hidden="true"></i></button>
+  </div>
+</header>
+
+<main class="container">
+
+  <section id="searchView">
+    <div class="hero">
+      <h1>Find where to read it.</h1>
+      <p>Official sites first, every link checked. Manga, manhwa and manhua.</p>
+      <form class="search" id="searchForm" role="search">
+        <i class="ti ti-search search-icon" aria-hidden="true"></i>
+        <input type="search" id="inp" placeholder="Search a title, e.g. Solo Leveling" autocomplete="off" autocapitalize="off" enterkeyhint="search" aria-label="Manga title" maxlength="200" />
+        <kbd class="search-kbd" aria-hidden="true">/</kbd>
+        <button type="submit" id="searchBtn">Find</button>
+      </form>
+      <div class="history" id="historySection" hidden>
+        <span class="history-label">Recent</span>
+        <div id="historyChips" class="chips"></div>
+        <button class="link-btn" data-action="clear-history">Clear</button>
+      </div>
     </div>
-    <button class="theme-toggle" id="themeBtn" title="Toggle Dark Mode">
-      <i class="ti ti-moon-filled"></i>
-    </button>
-  </div>
 
-  <div class="nav-tabs">
-    <button class="nav-tab active" id="tabSearch"><i class="ti ti-search"></i> Search</button>
-    <button class="nav-tab" id="tabBookmarks"><i class="ti ti-bookmark"></i> Watchlist <span id="bookmarkCount" class="badge-count" style="display:none">0</span></button>
-  </div>
+    <div id="status" class="status" role="status" aria-live="polite"></div>
+    <div id="results"></div>
+  </section>
 
-  <div id="searchView">
-
-  <div class="search-row">
-    <input type="text" id="inp" placeholder="e.g. Solo Leveling, One Piece..." autocomplete="off" />
-    <button id="searchBtn">
-      <i class="ti ti-search"></i> Find
-    </button>
-  </div>
-
-  <div class="status" id="status"></div>
-  <div id="results"></div>
-
-    <div class="history" id="historySection" style="display:none">
-      <div class="history-title">Recent Searches</div>
-      <div id="historyChips"></div>
+  <section id="bookmarksView" hidden>
+    <div class="section-head">
+      <div>
+        <h2>Watchlist</h2>
+        <p class="muted">Saved in this browser only. No account needed.</p>
+      </div>
+      <button id="checkAllBtn" class="btn btn-secondary"><i class="ti ti-refresh" aria-hidden="true"></i> Check for new chapters</button>
     </div>
-  </div> <!-- End searchView -->
+    <div id="bookmarksGrid" class="poster-grid"></div>
+  </section>
 
-  <div id="bookmarksView" style="display:none">
-    <div class="bookmarks-header">
-      <h2>My Watchlist</h2>
-      <button id="checkAllBtn" class="btn-check-all"><i class="ti ti-refresh"></i> Check All Updates</button>
-    </div>
-    <div id="bookmarksGrid" class="bookmarks-grid"></div>
-  </div>
+</main>
 
-</div>
+<div id="toasts" class="toasts" aria-live="polite"></div>
 
-<script src="script.js"></script>
+<script type="module" src="script.js"></script>
 </body>
 </html>
