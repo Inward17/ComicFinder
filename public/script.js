@@ -40,6 +40,18 @@ document.addEventListener('DOMContentLoaded', () => {
   tabBookmarks.addEventListener('click', () => switchView('bookmarks'));
   checkAllBtn.addEventListener('click', () => checkAllUpdates());
 
+  // Rendered markup carries data-action attributes instead of inline onclick handlers
+  document.addEventListener('click', e => {
+    const el = e.target.closest('[data-action]');
+    if (!el) return;
+    const { action, id, query } = el.dataset;
+    if (action === 'refresh') doSearch(true);
+    else if (action === 'toggle-synopsis') document.getElementById('synopsisText').classList.toggle('collapsed');
+    else if (action === 'toggle-bookmark') toggleBookmark(id);
+    else if (action === 'remove-bookmark') removeBookmark(id);
+    else if (action === 'search') fillAndSearch(query);
+  });
+
   // --- Init ---
   renderHistory();
   updateBookmarkBadge();
@@ -48,6 +60,28 @@ document.addEventListener('DOMContentLoaded', () => {
   // UTILITY FUNCTIONS
   // ============================================================
 
+  // Everything rendered via innerHTML comes from Gemini/MangaDex/localStorage and must be escaped
+  const HTML_ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+  function esc(value) {
+    return String(value ?? '').replace(/[&<>"']/g, c => HTML_ESCAPES[c]);
+  }
+
+  // Only http(s) links may be rendered; blocks javascript: and data: URLs
+  function safeUrl(url) {
+    try {
+      const parsed = new URL(url);
+      return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? parsed.href : '#';
+    } catch {
+      return '#';
+    }
+  }
+
+  function fillAndSearch(q) {
+    switchView('search');
+    inp.value = q;
+    doSearch();
+  }
+
   function toggleTheme() {
     const isDark = document.body.classList.toggle('dark-mode');
     themeBtn.innerHTML = isDark ? '<i class="ti ti-sun-filled"></i>' : '<i class="ti ti-moon-filled"></i>';
@@ -55,7 +89,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function showStatus(msg, spin = false) {
-    statusEl.innerHTML = (spin ? '<div class="spinner"></div>' : '') + `<span>${msg}</span>`;
+    statusEl.innerHTML = (spin ? '<div class="spinner"></div>' : '') + `<span>${esc(msg)}</span>`;
   }
 
   function setLoading(on) {
@@ -87,7 +121,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!q) return;
 
     // Smart frontend caching
-    const cacheKey = `mf_cache_v2_${q.toLowerCase()}`;
+    const cacheKey = `mf_cache_v3_${q.toLowerCase()}`; // v3: v2 entries hold results from the broken language check
 
     if (!forceRefresh) {
       const cachedData = localStorage.getItem(cacheKey);
@@ -124,14 +158,11 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch (err) {
       console.error(err);
       showStatus('');
-      resultsEl.innerHTML = `<div class="empty"><i class="ti ti-alert-circle"></i>Error: ${err.message || 'Check console for details.'}</div>`;
+      resultsEl.innerHTML = `<div class="empty"><i class="ti ti-alert-circle"></i>Error: ${esc(err.message || 'Check console for details.')}</div>`;
     }
 
     setLoading(false);
   }
-
-  // Expose doSearch globally so inline onclick="doSearch(true)" works
-  window.doSearch = doSearch;
 
   // ============================================================
   // RENDER RESULTS
@@ -143,7 +174,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (fromBackendCache || fromLocalCache) {
       resultsEl.innerHTML += `<div class="cache-notice">
         <span><i class="ti ti-bolt"></i> Loaded from cache ⚡</span>
-        <button class="btn-refresh" onclick="doSearch(true)"><i class="ti ti-refresh"></i> Force Refresh</button>
+        <button class="btn-refresh" data-action="refresh"><i class="ti ti-refresh"></i> Force Refresh</button>
       </div>`;
     }
 
@@ -162,27 +193,27 @@ document.addEventListener('DOMContentLoaded', () => {
 
       let mdHtml = `<div class="metadata-card">`;
       if (md.coverUrl) {
-        mdHtml += `<img class="metadata-cover" src="${md.coverUrl}" alt="Cover art">`;
+        mdHtml += `<img class="metadata-cover" src="${esc(safeUrl(md.coverUrl))}" alt="Cover art">`;
       }
       mdHtml += `<div class="metadata-info">`;
-      mdHtml += `<div class="metadata-title">${md.title}</div>`;
+      mdHtml += `<div class="metadata-title">${esc(md.title)}</div>`;
 
       if (md.tags && md.tags.length) {
         mdHtml += `<div class="genre-tags">`;
         md.tags.slice(0, 6).forEach(tag => {
-          mdHtml += `<span class="genre-tag">${tag}</span>`;
+          mdHtml += `<span class="genre-tag">${esc(tag)}</span>`;
         });
         mdHtml += `</div>`;
       }
 
       if (md.synopsis) {
-        mdHtml += `<div class="metadata-synopsis collapsed" id="synopsisText">${md.synopsis}</div>`;
-        mdHtml += `<button class="synopsis-toggle" onclick="document.getElementById('synopsisText').classList.toggle('collapsed')">Show more/less</button>`;
+        mdHtml += `<div class="metadata-synopsis collapsed" id="synopsisText">${esc(md.synopsis)}</div>`;
+        mdHtml += `<button class="synopsis-toggle" data-action="toggle-synopsis">Show more/less</button>`;
       }
 
       // Bookmark Toggle Button
       const isBookmarked = !!bookmarks[md.id];
-      mdHtml += `<div><button class="btn-bookmark-toggle ${isBookmarked ? 'active' : ''}" onclick="toggleBookmark('${md.id}')" id="btn-toggle-${md.id}">`;
+      mdHtml += `<div><button class="btn-bookmark-toggle ${isBookmarked ? 'active' : ''}" data-action="toggle-bookmark" data-id="${esc(md.id)}" id="btn-toggle-${esc(md.id)}">`;
       mdHtml += isBookmarked ? `<i class="ti ti-star-filled"></i> Bookmarked` : `<i class="ti ti-star"></i> Bookmark`;
       mdHtml += `</button></div>`;
 
@@ -193,7 +224,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const sites = data.results || [];
 
     if (!sites || !sites.length || (sites.length === 1 && sites[0].site === 'not found')) {
-      resultsEl.innerHTML += `<div class="empty"><i class="ti ti-ghost"></i><strong>${data.searchTitle || query}</strong> wasn't found.<br><span style="font-size:13px;margin-top:8px;display:block">Try checking the spelling or use the Japanese/Korean name.</span></div>`;
+      resultsEl.innerHTML += `<div class="empty"><i class="ti ti-ghost"></i><strong>${esc(data.searchTitle || query)}</strong> wasn't found.<br><span style="font-size:13px;margin-top:8px;display:block">Try checking the spelling or use the Japanese/Korean name.</span></div>`;
       return;
     }
 
@@ -202,26 +233,27 @@ document.addEventListener('DOMContentLoaded', () => {
       const isBest = i === 0 && !s.notes?.includes('Unverified');
       html += `<div class="result-card ${isBest ? 'best' : ''}">`;
       if (isBest) html += `<div class="badge"><i class="ti ti-star-filled"></i> Top Recommendation</div>`;
-      html += `<div class="result-title">${s.title || data.searchTitle || query}</div>`;
-      html += `<div class="result-site"><i class="ti ti-world" style="font-size:14px;vertical-align:-2px;margin-right:4px"></i>${s.site}</div>`;
+      html += `<div class="result-title">${esc(s.title || data.searchTitle || query)}</div>`;
+      html += `<div class="result-site"><i class="ti ti-world" style="font-size:14px;vertical-align:-2px;margin-right:4px"></i>${esc(s.site)}</div>`;
       html += `<div class="result-meta">`;
-      html += `<span class="pill good"><i class="ti ti-language" style="font-size:13px;vertical-align:-2px;margin-right:3px"></i>${s.language || 'English'}</span>`;
+      html += `<span class="pill good"><i class="ti ti-language" style="font-size:13px;vertical-align:-2px;margin-right:3px"></i>${esc(s.language || 'English')}</span>`;
       html += s.free
         ? `<span class="pill good"><i class="ti ti-currency-dollar-off" style="font-size:13px;vertical-align:-2px;margin-right:3px"></i>Free</span>`
         : `<span class="pill warn">Paid / Sub</span>`;
       if (s.official) html += `<span class="pill good"><i class="ti ti-shield-check" style="font-size:13px;vertical-align:-2px;margin-right:3px"></i>Official</span>`;
-      if (s.status) html += `<span class="pill">${s.status}</span>`;
-      if (s.chaptersAvailable) html += `<span class="pill">${s.chaptersAvailable} ch.</span>`;
+      if (s.status) html += `<span class="pill">${esc(s.status)}</span>`;
+      if (s.chaptersAvailable) html += `<span class="pill">${esc(s.chaptersAvailable)} ch.</span>`;
       html += `</div>`;
-      if (s.notes) html += `<div class="result-note">${s.notes}</div>`;
+      if (s.notes) html += `<div class="result-note">${esc(s.notes)}</div>`;
 
+      const url = safeUrl(s.url);
       html += `<div class="action-buttons">`;
-      html += `<a class="btn-read" href="${s.url}" target="_blank" rel="noopener"><i class="ti ti-book-2"></i> Series Page <i class="ti ti-external-link" style="font-size:14px"></i></a>`;
+      html += `<a class="btn-read" href="${esc(url)}" target="_blank" rel="noopener"><i class="ti ti-book-2"></i> Series Page <i class="ti ti-external-link" style="font-size:14px"></i></a>`;
 
-      const lowerUrl = s.url ? s.url.toLowerCase() : '';
+      const lowerUrl = url.toLowerCase();
       if (lowerUrl.includes('webtoons.com')) {
         const sep = lowerUrl.includes('?') ? '&' : '?';
-        html += `<a class="btn-chapter" href="${s.url}${sep}episode_no=1" target="_blank" rel="noopener"><i class="ti ti-player-play"></i> First Chapter</a>`;
+        html += `<a class="btn-chapter" href="${esc(url + sep + 'episode_no=1')}" target="_blank" rel="noopener"><i class="ti ti-player-play"></i> First Chapter</a>`;
       }
 
       html += `</div>`;
@@ -247,7 +279,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!history.length) { sec.style.display = 'none'; return; }
     sec.style.display = 'block';
     chips.innerHTML = history.map(h =>
-      `<span class="chip" onclick="fillAndSearch('${h.replace(/'/g, "\\\'")}')"><i class="ti ti-clock" style="font-size:13px"></i> ${h}</span>`
+      `<span class="chip" data-action="search" data-query="${esc(h)}"><i class="ti ti-clock" style="font-size:13px"></i> ${esc(h)}</span>`
     ).join('');
   }
 
@@ -348,22 +380,22 @@ document.addEventListener('DOMContentLoaded', () => {
         html += `<div class="badge-new"><i class="ti ti-bolt" style="font-size:12px"></i> NEW CHAPTER</div>`;
       }
       if (b.coverUrl) {
-        html += `<img class="bookmark-cover" src="${b.coverUrl}" alt="Cover">`;
+        html += `<img class="bookmark-cover" src="${esc(safeUrl(b.coverUrl))}" alt="Cover">`;
       }
       html += `<div class="bookmark-info">`;
-      html += `<div class="bookmark-title" title="${b.title}">${b.title}</div>`;
+      html += `<div class="bookmark-title" title="${esc(b.title)}">${esc(b.title)}</div>`;
       html += `<div class="bookmark-meta">`;
-      html += `<div><strong>Status:</strong> ${b.lastChapter !== '?' ? 'Ch. ' + b.lastChapter : 'Ongoing'}</div>`;
-      if (b.readingSite) html += `<div style="margin-top:4px"><i class="ti ti-world" style="font-size:12px"></i> ${b.readingSite}</div>`;
+      html += `<div><strong>Status:</strong> ${b.lastChapter !== '?' ? 'Ch. ' + esc(b.lastChapter) : 'Ongoing'}</div>`;
+      if (b.readingSite) html += `<div style="margin-top:4px"><i class="ti ti-world" style="font-size:12px"></i> ${esc(b.readingSite)}</div>`;
       html += `</div>`;
 
       html += `<div class="bookmark-actions">`;
       if (b.readingUrl) {
-        html += `<a class="btn-read" href="${b.readingUrl}" target="_blank" rel="noopener" style="padding: 6px 10px; font-size: 11px;"><i class="ti ti-book-2"></i> Go to Series</a>`;
+        html += `<a class="btn-read" href="${esc(safeUrl(b.readingUrl))}" target="_blank" rel="noopener" style="padding: 6px 10px; font-size: 11px;"><i class="ti ti-book-2"></i> Go to Series</a>`;
       } else {
-        html += `<button class="btn-read" onclick="fillAndSearch('${b.title.replace(/'/g, "\\\\'")}')" style="padding: 6px 10px; font-size: 11px;"><i class="ti ti-search"></i> Search</button>`;
+        html += `<button class="btn-read" data-action="search" data-query="${esc(b.title)}" style="padding: 6px 10px; font-size: 11px;"><i class="ti ti-search"></i> Search</button>`;
       }
-      html += `<button class="btn-remove" onclick="removeBookmark('${b.id}')" title="Remove bookmark"><i class="ti ti-trash"></i></button>`;
+      html += `<button class="btn-remove" data-action="remove-bookmark" data-id="${esc(b.id)}" title="Remove bookmark"><i class="ti ti-trash"></i></button>`;
       html += `</div>`;
 
       html += `</div></div>`;
@@ -381,6 +413,7 @@ document.addEventListener('DOMContentLoaded', () => {
     checkAllBtn.innerHTML = '<i class="ti ti-loader-2 spinner"></i> Checking...';
 
     let updatedCount = 0;
+    let rateLimited = false;
 
     for (let i = 0; i < keys.length; i++) {
       const id = keys[i];
@@ -392,6 +425,10 @@ document.addEventListener('DOMContentLoaded', () => {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ query: b.title })
         });
+        if (resp.status === 429) {
+          rateLimited = true;
+          break;
+        }
         const data = await resp.json();
 
         if (data.metadata && data.metadata.lastChapter) {
@@ -416,26 +453,12 @@ document.addEventListener('DOMContentLoaded', () => {
     if (updatedCount > 0) {
       saveBookmarks();
       renderBookmarks();
-      alert(`Found new chapters for ${updatedCount} manga!`);
-    } else {
-      alert("No new chapters found.");
     }
+    const summary = updatedCount > 0 ? `Found new chapters for ${updatedCount} manga!` : "No new chapters found.";
+    alert(rateLimited ? `${summary} Stopped early: search limit reached, try again in a minute.` : summary);
 
     checkAllBtn.disabled = false;
     checkAllBtn.innerHTML = originalHtml;
   }
-
-  // ============================================================
-  // EXPOSE FUNCTIONS TO GLOBAL SCOPE (for inline onclick handlers)
-  // ============================================================
-
-  window.toggleBookmark = toggleBookmark;
-  window.removeBookmark = removeBookmark;
-  window.fillAndSearch = function(q) {
-    switchView('search');
-    inp.value = q;
-    doSearch();
-  };
-  window.checkAllUpdates = checkAllUpdates;
 
 }); // end DOMContentLoaded

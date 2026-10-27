@@ -1,6 +1,5 @@
 require('dotenv').config();
 const express = require('express');
-const cors = require('cors');
 const path = require('path');
 const apiRoutes = require('./routes/api');
 
@@ -8,11 +7,10 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // Middleware
-app.use(cors());
 app.use(express.json());
 
-// Serve static frontend files from the parent directory
-app.use(express.static(path.join(__dirname, '../')));
+// Serve only the frontend; the project root holds backend source and local files
+app.use(express.static(path.join(__dirname, '../public')));
 
 // API Routes
 app.use('/api', apiRoutes);

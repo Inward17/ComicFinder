@@ -29,15 +29,17 @@ mangafinder-pro/
 ├── backend/
 │   ├── server.js              # Express entry point, serves static files
 │   ├── routes/
-│   │   └── api.js             # /api/search and /api/check-links endpoints
+│   │   └── api.js             # /api/search endpoint (rate limited)
 │   └── services/
 │       ├── geminiService.js   # Gemini API orchestration + cache integration
-│       ├── validationService.js # Link health checks & Unicode detection
+│       ├── validationService.js # Link health checks, Unicode detection, SSRF guard
 │       ├── mangadexService.js # MangaDex title normalization & metadata
 │       └── cacheService.js    # File-based JSON cache with lockfile safety
-├── index.html                 # Main UI
-├── script.js                  # Frontend logic (search, bookmarks, rendering)
-├── style.css                  # Design system & responsive layout
+├── public/                    # Only this folder is served statically
+│   ├── index.html             # Main UI
+│   ├── script.js              # Frontend logic (search, bookmarks, rendering)
+│   └── style.css              # Design system & responsive layout
+├── test/                      # node --test suites (npm test)
 ├── .env.example               # Environment variable template
 ├── package.json
 └── README.md

@@ -29,7 +29,8 @@ async function searchManga(query) {
     url.searchParams.append('order[relevance]', 'desc');
 
     const response = await fetch(url.toString(), {
-      headers: { 'User-Agent': 'MangaFinderBot/2.0' }
+      headers: { 'User-Agent': 'MangaFinderBot/2.0' },
+      signal: AbortSignal.timeout(8000)
     });
 
     if (!response.ok) {
