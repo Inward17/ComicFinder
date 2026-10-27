@@ -1,9 +1,11 @@
 # MangaFinder Pro
 
-> A smart web application that uses AI to find the best English reading sites for any manga, manhwa, or manhua — powered by Google Gemini 2.5.
+> Find where to read any manga, manhwa, or manhua in English. Official sources first, every link checked.
 
 ![License](https://img.shields.io/badge/license-MIT-blue)
-![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen)
+![Node](https://img.shields.io/badge/node-%3E%3D20-brightgreen)
+
+MangaFinder Pro takes a title, works out which series you mean, and returns a short list of places to read it, with licensed publishers ranked above fan translations and aggregators. Every link is opened and checked before it is shown, so you don't get dead pages, homepages, or the wrong series.
 
 ---
 
@@ -11,41 +13,14 @@
 
 | Feature | Description |
 |---|---|
-| **AI-Powered Search** | Uses Gemini 2.5 with grounded web search to find direct links to manga series pages — not generic Google results. |
-| **Link Validation** | Every result is verified: dead links, non-English pages, and Cloudflare-blocked sites are automatically filtered out. |
-| **Rich Metadata** | Displays cover art, synopsis, genre tags, chapter count, and author info via the MangaDex API. |
-| **Title Normalization** | Typos and alternate names (e.g. "solo leveling" → "Solo Leveling") are auto-corrected before searching. |
-| **Watchlist** | Bookmark your favourite manga locally. Check for new chapters with a single click. |
-| **Backend Caching** | Repeated searches return instantly from a local file cache (24h TTL), saving API tokens and time. |
-| **Dark Mode** | Toggle between light and dark themes. Your preference is saved. |
-| **Search History** | Recent searches are saved as quick-access chips. |
-
----
-
-## 🏗️ Architecture
-
-```
-mangafinder-pro/
-├── backend/
-│   ├── server.js              # Express entry point, serves static files
-│   ├── routes/
-│   │   └── api.js             # /api/search endpoint (rate limited)
-│   └── services/
-│       ├── geminiService.js   # Gemini API orchestration + cache integration
-│       ├── validationService.js # Link health checks, Unicode detection, SSRF guard
-│       ├── mangadexService.js # MangaDex title normalization & metadata
-│       ├── siteFamilyService.js # Direct lookups on aggregator sites (slug guess + search fallback)
-│       ├── firecrawlService.js # Optional Firecrawl client for Cloudflare-protected pages
-│       └── cacheService.js    # File-based JSON cache with lockfile safety
-├── public/                    # Only this folder is served statically
-│   ├── index.html             # Main UI
-│   ├── script.js              # Frontend logic (search, bookmarks, rendering)
-│   └── style.css              # Design system & responsive layout
-├── test/                      # node --test suites (npm test)
-├── .env.example               # Environment variable template
-├── package.json
-└── README.md
-```
+| **Smart search** | Google Gemini with grounded web search finds reading sites for the title, and known aggregator sites are queried directly in parallel. |
+| **Verified links** | Each link is fetched and checked: dead pages, homepages, search pages, non-English pages and pages about a different series are dropped. |
+| **Official first** | Results are split into *Official* and *Other sources*, with licensed publishers ranked at the top. |
+| **Right series** | Titles are matched on MangaDex across English, romanized and alternate names, skipping fan works. A "Not this one?" row lets you switch to a related series. |
+| **Series details** | Cover, author, year, status, genres, synopsis and the latest chapter. |
+| **Watchlist** | Save series in your browser and check them all for new chapters in one click. No account needed. |
+| **Fast repeats** | Results are cached for 24 hours on the server and in the browser. |
+| **Works on phones** | Responsive layout with a bottom tab bar, large tap targets and dark mode. |
 
 ---
 
@@ -53,28 +28,28 @@ mangafinder-pro/
 
 ### Prerequisites
 
-- [Node.js](https://nodejs.org/) v18 or higher
-- A free [Google Gemini API Key](https://aistudio.google.com/app/apikey)
+- [Node.js](https://nodejs.org/) 20 or newer
+- A free [Google Gemini API key](https://aistudio.google.com/app/apikey)
+- *(Optional)* A [Firecrawl](https://www.firecrawl.dev) API key (free tier: 1,000 credits a month)
 
 ### Installation
 
 ```bash
-# 1. Clone the repository
 git clone https://github.com/Inward17/ComicFinder.git
 cd ComicFinder
-
-# 2. Install dependencies
 npm install
-
-# 3. Create your environment file
-cp .env.example .env
-# Then open .env and paste your Gemini API key
-
-# 4. Start the server
+cp .env.example .env    # then add your API key(s)
 npm start
 ```
 
-Open [http://localhost:3000](http://localhost:3000) in your browser.
+Open [http://localhost:3000](http://localhost:3000).
+
+### Scripts
+
+| Command | What it does |
+|---|---|
+| `npm start` | Start the server on port 3000 (override with `PORT`) |
+| `npm test` | Run the test suite (`node --test`) |
 
 ---
 
@@ -82,8 +57,56 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 | Variable | Required | Description |
 |---|---|---|
-| `GEMINI_API_KEY` | ✅ | Your Google Gemini API key from [AI Studio](https://aistudio.google.com/app/apikey) |
-| `FIRECRAWL_API_KEY` | Optional | [Firecrawl](https://www.firecrawl.dev) key. Unlocks Cloudflare-protected aggregator sites and verifies Cloudflare-blocked links (about 1–3 credits per uncached search). Without it, only plain fetch is used. |
+| `GEMINI_API_KEY` | ✅ | Google Gemini API key from [AI Studio](https://aistudio.google.com/app/apikey). |
+| `FIRECRAWL_API_KEY` | Optional | Lets the app read sites protected by Cloudflare challenges, both for direct lookups and for checking links. Uses about 1–3 credits per new search. Without it, those sites are skipped or left unchecked. |
+| `PORT` | Optional | Server port. Defaults to `3000`. |
+
+---
+
+## 📖 How It Works
+
+1. **Identify the series.** The query is matched against MangaDex titles and alternate names to pick the right series and its metadata.
+2. **Check the cache.** A result for the same series from the last 24 hours is returned immediately.
+3. **Find candidates, in parallel:**
+   - **Gemini** searches the web for reading sites and returns them as structured data.
+   - **Direct site lookups** try the series' page on known aggregator sites by URL. If a site is behind Cloudflare, its search page is read through Firecrawl instead (when a key is set).
+4. **Verify every link.** Each page is fetched and must load, still be a series page after redirects, be in English, and mention the title.
+5. **Rank and return.** Official sources first, then other verified links. The result is cached.
+
+---
+
+## 🔒 Privacy and Security
+
+- **Your data stays in your browser.** The watchlist, search history and theme are stored in `localStorage` under a single key (`mangafinder.v1`). Nothing is sent to the server, and clearing site data removes it.
+- **API keys stay on the server.** They are read from `.env` and never sent to the browser.
+- **Abuse protection.** Searches are rate limited per IP (10 per minute), and the server refuses to fetch private or internal network addresses.
+
+---
+
+## 🏗️ Project Structure
+
+```
+ComicFinder/
+├── backend/
+│   ├── server.js                 # Express entry point; serves public/ and the API
+│   ├── routes/
+│   │   └── api.js                # POST /api/search (validation + rate limit)
+│   └── services/
+│       ├── geminiService.js      # Search pipeline: Gemini, site lookups, ranking, cache
+│       ├── mangadexService.js    # Series matching and metadata from MangaDex
+│       ├── siteFamilyService.js  # Direct lookups on aggregator sites
+│       ├── validationService.js  # Link checks, language check, SSRF guard
+│       ├── firecrawlService.js   # Optional Firecrawl client
+│       └── cacheService.js       # 24h file cache for search results
+├── public/
+│   ├── index.html
+│   ├── script.js                 # UI: search, results, watchlist
+│   ├── store.mjs                 # Browser storage (watchlist, history, theme, cache)
+│   └── style.css
+├── test/                         # node:test suites
+├── .env.example
+└── package.json
+```
 
 ---
 
@@ -91,36 +114,26 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 | Layer | Technology |
 |---|---|
-| **Frontend** | HTML5, Vanilla CSS, Vanilla JS |
+| **Frontend** | HTML, CSS, vanilla JavaScript (no build step) |
 | **Backend** | Node.js, Express 5 |
-| **AI** | Google Gemini 2.5 Flash (with grounded search) |
+| **Search** | Google Gemini 2.5 Flash with Google Search grounding |
 | **Metadata** | MangaDex API v5 |
-| **Caching** | File-based JSON with `proper-lockfile` |
-| **Icons** | [Tabler Icons](https://tabler-icons.io/) |
-| **Fonts** | Bebas Neue, DM Sans (Google Fonts) |
-
----
-
-## 📖 How It Works
-
-1. **User searches** for a manga title (e.g. "One Piece").
-2. **MangaDex API** normalizes the title and fetches metadata (cover, synopsis, tags, chapter count).
-3. **Backend cache** is checked — if a valid result exists (< 24h old), it's returned instantly.
-4. On cache miss, **Gemini 2.5** searches the web for reading sites and returns structured JSON.
-5. **Validation service** checks each link for liveness and correct language; Cloudflare-blocked pages are re-checked through Firecrawl when a key is set.
-6. **Site lookups** run in parallel: known aggregator sites are queried directly by guessed slug (free), falling back to their search page via Firecrawl.
-7. Results are returned to the frontend with a `fromCache` flag so the UI can show a cache notice.
-8. Users can **bookmark** manga to a local watchlist and check for new chapters later.
+| **Scraping** | Firecrawl (optional) |
+| **Icons / fonts** | Tabler Icons, Bebas Neue, DM Sans |
 
 ---
 
 ## 🗺️ Roadmap
 
-- [x] **Phase 1** — Node.js backend, API key security, link validation, fallback chain
-- [x] **Phase 2** — Metadata cards, title normalization, collapsible synopsis
-- [x] **Phase 3** — Watchlist with localStorage, sequential update checks
-- [x] **Phase 4** — Backend file caching with TTL, cache pruning, lockfile safety
-- [ ] **Phase 5** — User accounts, cross-device sync, Redis caching at scale
+- [ ] Lighter watchlist updates using MangaDex chapter feeds instead of full searches
+- [ ] Export and import the watchlist as a file
+- [ ] Configurable Gemini model
+
+---
+
+## ⚠️ Disclaimer
+
+MangaFinder Pro only links to third-party websites; it does not host any content. Results marked *Other sources* may be unofficial. Please support creators by reading on official platforms where available.
 
 ---
 
