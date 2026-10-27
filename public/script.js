@@ -121,7 +121,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!q) return;
 
     // Smart frontend caching
-    const cacheKey = `mf_cache_v3_${q.toLowerCase()}`; // v3: v2 entries hold results from the broken language check
+    const cacheKey = `mf_cache_v4_${q.toLowerCase()}`; // v4: older entries predate homepage/title checks and disambiguation
 
     if (!forceRefresh) {
       const cachedData = localStorage.getItem(cacheKey);
@@ -216,6 +216,16 @@ document.addEventListener('DOMContentLoaded', () => {
       mdHtml += `<div><button class="btn-bookmark-toggle ${isBookmarked ? 'active' : ''}" data-action="toggle-bookmark" data-id="${esc(md.id)}" id="btn-toggle-${esc(md.id)}">`;
       mdHtml += isBookmarked ? `<i class="ti ti-star-filled"></i> Bookmarked` : `<i class="ti ti-star"></i> Bookmark`;
       mdHtml += `</button></div>`;
+
+      // Other MangaDex matches, in case the pick was the wrong series
+      if (md.alternatives && md.alternatives.length) {
+        mdHtml += `<div class="alternatives"><span class="alternatives-label">Not this one?</span>`;
+        md.alternatives.forEach(alt => {
+          const label = alt.year ? `${alt.title} (${alt.year})` : alt.title;
+          mdHtml += `<span class="chip" data-action="search" data-query="${esc(alt.title)}">${esc(label)}</span>`;
+        });
+        mdHtml += `</div>`;
+      }
 
       mdHtml += `</div></div>`;
       resultsEl.innerHTML += mdHtml;

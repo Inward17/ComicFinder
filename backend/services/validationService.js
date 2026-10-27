@@ -12,6 +12,7 @@ const firecrawlService = require('./firecrawlService');
 const TIMEOUT_MS = 5000;
 const MAX_REDIRECTS = 5;
 const CJK_THRESHOLD = 0.15;
+const MIN_TEXT_FOR_TITLE_CHECK = 300; // non-whitespace chars
 const CJK_RE = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/gu;
 
 const blockedRanges = new net.BlockList();
@@ -108,13 +109,94 @@ function isEnglishText(text) {
 }
 
 /**
- * Runs health and language checks on a candidate with a single fetch
+ * Lowercase, accent-free, punctuation-free text for title matching ("Reader's" -> "readers").
+ * @param {string} s
+ */
+function normalizeForMatch(s) {
+  return String(s || '')
+    .normalize('NFKD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/['’]/g, '')
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim();
+}
+
+/**
+ * True if any title appears as a whole phrase in the text.
+ * @param {string} text
+ * @param {string[]} titles
+ */
+function mentionsTitle(text, titles) {
+  const haystack = ` ${normalizeForMatch(text)} `;
+  return titles.some(t => {
+    const needle = normalizeForMatch(t);
+    return needle && haystack.includes(` ${needle} `);
+  });
+}
+
+/**
+ * Why a URL can't be a series page (homepage or search results), or null if it might be one.
+ * @param {string} rawUrl
+ * @returns {string|null}
+ */
+function seriesUrlProblem(rawUrl) {
+  let url;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    return 'Invalid URL';
+  }
+  if (/\/(search|keyword)(\/|$)/i.test(url.pathname) || /[?&](q|s|query|keyword|search)=/i.test(url.search)) {
+    return 'Search page, not a series page';
+  }
+  const path = url.pathname.replace(/\/+$/, '');
+  if (!path || /^\/(en|home|index(\.\w+)?)$/i.test(path)) return 'Homepage, not a series page';
+  return null;
+}
+
+/**
+ * Checks a loaded page: still a series page after redirects, English, and about the right title.
+ * @param {string} text Visible text plus <title>/meta content
+ * @param {string} url Final URL after redirects
+ * @param {string[]} titles Acceptable titles; empty skips the title check
+ * @returns {string|null} Rejection reason, or null if the page passes
+ */
+function contentProblem(text, url, titles) {
+  const urlProblem = seriesUrlProblem(url);
+  if (urlProblem) return `Redirected away from series page (${urlProblem})`;
+  if (!isEnglishText(text)) return 'Failed Unicode language check (Contains CJK)';
+  // JS-rendered pages carry almost no text, so only judge pages with enough of it
+  // ponytail: phrase match also accepts pages that merely mention the title (e.g. a "related" sidebar)
+  if (titles.length && text.replace(/\s+/g, '').length >= MIN_TEXT_FOR_TITLE_CHECK && !mentionsTitle(text, titles)) {
+    return 'Page does not mention this title';
+  }
+  return null;
+}
+
+/**
+ * Text used for checks: <title> and <meta content> values (SPAs put the series name there) plus body text.
+ * @param {string} html
+ */
+function pageText(html) {
+  const metas = [...html.matchAll(/<meta[^>]+content="([^"]*)"/gi)].map(m => m[1]).join(' ');
+  return metas + ' ' + extractText(html);
+}
+
+/**
+ * Runs URL-shape, health, language and title checks on a candidate with a single fetch
  * @param {Object} candidate From Gemini API
+ * @param {string[]} [titles] Acceptable titles for the page-mentions-title check
  * @returns {Promise<Object>} Candidate with validation result
  */
-async function validateCandidate(candidate) {
+async function validateCandidate(candidate, titles = []) {
   if (!candidate.url) {
     return { ...candidate, valid: false, reason: 'No URL provided' };
+  }
+
+  const urlProblem = seriesUrlProblem(candidate.url);
+  if (urlProblem) {
+    return { ...candidate, valid: false, reason: urlProblem };
   }
 
   let page;
@@ -143,22 +225,22 @@ async function validateCandidate(candidate) {
       return { ...candidate, valid: false, reason: `Dead link (HTTP ${status}, via Firecrawl)` };
     }
     if (status >= 200 && status < 300) {
-      if (!isEnglishText(page.markdown || '')) {
-        return { ...candidate, valid: false, reason: 'Failed Unicode language check (Contains CJK, via Firecrawl)' };
-      }
-      return { ...candidate, valid: true, url: page.metadata.url || finalUrl };
+      const url = page.metadata.url || finalUrl;
+      const text = `${page.metadata.title || ''} ${page.metadata.description || ''} ${page.markdown || ''}`;
+      const problem = contentProblem(text, url, titles);
+      if (problem) return { ...candidate, valid: false, reason: `${problem} (via Firecrawl)` };
+      return { ...candidate, valid: true, url };
     }
     // Firecrawl failed or was blocked too: fall through and keep the link, as without Firecrawl
   }
 
-  // Blocked pages (403/503) can't be language-checked; assume English to avoid falsely dropping them.
+  // Blocked pages (403/503) can't be content-checked; assume fine to avoid falsely dropping them.
   const isHtml = (response.headers.get('content-type') || '').includes('html');
   if (response.ok && isHtml) {
     try {
       const html = await response.text();
-      if (!isEnglishText(extractText(html))) {
-        return { ...candidate, valid: false, reason: 'Failed Unicode language check (Contains CJK)' };
-      }
+      const problem = contentProblem(pageText(html), finalUrl, titles);
+      if (problem) return { ...candidate, valid: false, reason: problem };
     } catch {
       // Body read failed or timed out; the link itself is alive, so keep it.
     }
@@ -173,5 +255,8 @@ module.exports = {
   assertPublicUrl,
   fetchPage,
   isEnglishText,
+  mentionsTitle,
+  normalizeForMatch,
+  seriesUrlProblem,
   validateCandidate
 };

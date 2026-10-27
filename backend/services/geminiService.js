@@ -58,14 +58,24 @@ async function fetchGeminiCandidates(searchTitle, apiKey) {
 
   const candidates = JSON.parse(textResponse);
   if (!Array.isArray(candidates)) throw new Error('Gemini did not return a JSON array');
-  return candidates;
+
+  // Domains Gemini actually saw in search results (chunk titles are domains like "tapas.io").
+  // Used for ranking only: chunks are often missing or partial, and real official sites
+  // (Tappytoon, Webnovel) get left out, so ungrounded links still go through page validation.
+  const chunks = (candidate.groundingMetadata && candidate.groundingMetadata.groundingChunks) || [];
+  const groundedHosts = chunks.map(ch => ch.web && ch.web.title).filter(Boolean).map(hostOf);
+
+  return candidates.map(c => {
+    const host = hostOf(c.url);
+    return { ...c, grounded: groundedHosts.some(g => host === g || host.endsWith('.' + g)) };
+  });
 }
 
 function hostOf(url) {
   try {
-    return new URL(url).hostname.replace(/^www\./, '');
+    return new URL(url.includes('://') ? url : `https://${url}`).hostname.replace(/^www\./, '');
   } catch {
-    return url;
+    return String(url).toLowerCase();
   }
 }
 
@@ -101,9 +111,10 @@ async function searchManga(query, forceRefresh = false) {
   }
 
   // Validate Gemini candidates concurrently while the direct site lookups run
+  const titles = siteFamilyService.candidateTitles(query, metadata);
   const [geminiOutcome, siteResults] = await Promise.all([
     fetchGeminiCandidates(searchTitle, API_KEY)
-      .then(candidates => Promise.all(candidates.map(c => validateCandidate(c))))
+      .then(candidates => Promise.all(candidates.map(c => validateCandidate(c, titles))))
       .catch(err => ({ error: err })),
     siteFamilyService.findOnSites(query, metadata)
   ]);
@@ -120,15 +131,19 @@ async function searchManga(query, forceRefresh = false) {
   // Fallback Chain Logic
   // Direct lookups are already verified and point at the series page, so they replace Gemini's link for the same site
   const siteHosts = new Set(siteResults.map(r => hostOf(r.url)));
-  const passingResults = validatedResults.filter(r => r.valid && !siteHosts.has(hostOf(r.url)));
+  // Official first, then links Gemini actually saw in search results; sort is stable so Gemini's order breaks ties
+  const passingResults = validatedResults
+    .filter(r => r.valid && !siteHosts.has(hostOf(r.url)))
+    .sort((a, b) => (b.official === true) - (a.official === true) || b.grounded - a.grounded);
   const failingResults = validatedResults.filter(r => !r.valid);
 
   let finalResults;
 
   // If nothing passed our strict validation (e.g., all blocked by Cloudflare),
   // it's better UX to return the unverified results than an empty screen.
+  // Only timeouts are uncertain (slow or region-blocked sites); every other rejection is a definite no.
   if (passingResults.length === 0 && siteResults.length === 0) {
-    finalResults = validatedResults.map(r => ({
+    finalResults = validatedResults.filter(r => r.reason === 'Dead link or timeout').map(r => ({
       ...r,
       notes: (r.notes ? r.notes + ' ' : '') + '⚠️ (Unverified link)'
     }));

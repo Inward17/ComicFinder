@@ -51,12 +51,12 @@ function slugify(title) {
 function candidateTitles(query, metadata) {
   const titles = [query];
   if (metadata) {
-    titles.push(metadata.title);
+    titles.push(metadata.title, metadata.canonicalTitle);
     for (const alt of metadata.altTitles || []) {
       if (alt.en) titles.push(alt.en);
     }
   }
-  return titles;
+  return titles.filter(Boolean);
 }
 
 /**
@@ -156,24 +156,27 @@ async function guessSeries(site, family, slugs) {
  * Scrapes the site's search page through Firecrawl and picks the matching series.
  * @returns {Promise<{url: string, chapter: number|null}|null>}
  */
-async function searchSeries(site, family, slugs, query) {
-  const searchQuery = slugify(query).replace(/-/g, '_');
-  const data = await firecrawlService.scrape(site.base + family.searchPath.replace('{query}', searchQuery), ['links']);
-  if (!data || !data.links || !data.metadata) return null;
+async function searchSeries(site, family, slugs, searchSlugs) {
+  for (const searchSlug of searchSlugs) {
+    const searchQuery = searchSlug.replace(/-/g, '_');
+    const data = await firecrawlService.scrape(site.base + family.searchPath.replace('{query}', searchQuery), ['links']);
+    if (!data || !data.links || !data.metadata) return null; // Firecrawl off or failing: don't retry
 
-  const origin = new URL(data.metadata.url || data.metadata.sourceURL).origin;
-  const seriesUrl = pickSeriesLink(data.links, origin, family.seriesPath, slugs);
-  if (!seriesUrl) return null;
-
-  // Search results list each title's latest chapter links right after it
-  return { url: seriesUrl, chapter: newestChapter(data.links, seriesUrl) };
+    const origin = new URL(data.metadata.url || data.metadata.sourceURL).origin;
+    const seriesUrl = pickSeriesLink(data.links, origin, family.seriesPath, slugs);
+    if (seriesUrl) {
+      // Search results list each title's latest chapter links right after it
+      return { url: seriesUrl, chapter: newestChapter(data.links, seriesUrl) };
+    }
+  }
+  return null;
 }
 
-async function lookupSite(site, family, slugs, query, title) {
+async function lookupSite(site, family, slugs, searchSlugs, title) {
   try {
     let found = await guessSeries(site, family, slugs);
     if (!found || found.blocked) {
-      found = await searchSeries(site, family, slugs, query);
+      found = await searchSeries(site, family, slugs, searchSlugs);
     }
     if (!found) return null;
 
@@ -207,9 +210,12 @@ async function findOnSites(query, metadata) {
   const slugs = [...new Set(titles.map(slugify).filter(Boolean))].slice(0, MAX_SLUG_GUESSES);
   if (!slugs.length) return [];
 
+  // Site search terms: what the user typed, then the English canonical title (romaji searches often miss).
+  // At most 2, so a Cloudflare-protected site costs at most 2 Firecrawl credits.
+  const searchSlugs = [...new Set([query, metadata && metadata.canonicalTitle].filter(Boolean).map(slugify))].slice(0, 2);
   const searchTitle = metadata ? metadata.title : query;
   const lookups = SITE_FAMILIES.flatMap(family =>
-    family.sites.map(site => lookupSite(site, family, slugs, query, searchTitle))
+    family.sites.map(site => lookupSite(site, family, slugs, searchSlugs, searchTitle))
   );
   return (await Promise.all(lookups)).filter(Boolean);
 }

@@ -174,6 +174,8 @@ body {
   font-weight: 500; font-family: inherit;
 }
 .synopsis-toggle:hover { text-decoration: underline; }
+.alternatives { margin-top: 12px; }
+.alternatives-label { font-size: 12px; color: var(--text-muted); margin-right: 8px; }
 
 .genre-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
 .genre-tag {
