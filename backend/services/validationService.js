@@ -7,6 +7,7 @@
 
 const net = require('net');
 const dns = require('dns').promises;
+const firecrawlService = require('./firecrawlService');
 
 const TIMEOUT_MS = 5000;
 const MAX_REDIRECTS = 5;
@@ -133,6 +134,23 @@ async function validateCandidate(candidate) {
     return { ...candidate, valid: false, reason: `Dead link (HTTP ${response.status})` };
   }
 
+  // Cloudflare-style block: let Firecrawl load the page for a real verdict (only when FIRECRAWL_API_KEY is set)
+  if (!response.ok && firecrawlService.isEnabled()) {
+    response.body?.cancel();
+    const page = await firecrawlService.scrape(finalUrl, ['markdown']);
+    const status = page && page.metadata ? page.metadata.statusCode : 0;
+    if ([404, 410].includes(status)) {
+      return { ...candidate, valid: false, reason: `Dead link (HTTP ${status}, via Firecrawl)` };
+    }
+    if (status >= 200 && status < 300) {
+      if (!isEnglishText(page.markdown || '')) {
+        return { ...candidate, valid: false, reason: 'Failed Unicode language check (Contains CJK, via Firecrawl)' };
+      }
+      return { ...candidate, valid: true, url: page.metadata.url || finalUrl };
+    }
+    // Firecrawl failed or was blocked too: fall through and keep the link, as without Firecrawl
+  }
+
   // Blocked pages (403/503) can't be language-checked; assume English to avoid falsely dropping them.
   const isHtml = (response.headers.get('content-type') || '').includes('html');
   if (response.ok && isHtml) {
@@ -153,6 +171,7 @@ async function validateCandidate(candidate) {
 
 module.exports = {
   assertPublicUrl,
+  fetchPage,
   isEnglishText,
   validateCandidate
 };
