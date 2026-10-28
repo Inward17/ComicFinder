@@ -20,18 +20,15 @@ const bookmarkCount = $('bookmarkCount');
 const checkAllBtn = $('checkAllBtn');
 
 const SUGGESTIONS = ['Solo Leveling', 'One Piece', 'Omniscient Reader', 'Frieren'];
-const LOADING_STEPS = [
-  [0, 'Matching the title on MangaDex…'],
-  [2, 'Searching the web for reading sites…'],
-  [9, 'Checking every link and aggregator site…'],
-  [20, 'Still verifying pages, almost there…']
-];
+const SLOW_SEARCH_SECONDS = 20;
 
 // Series shown in the current results, used when bookmarking it
 let currentSeries = null;
 let loadingTimer = null;
+let loadingStage = ''; // Status text, advanced by stream events
 // Arguments of the last renderResults call, so filters can re-render without searching again
 let lastRender = null;
+let searchController = null;
 
 // ============================================================
 // UTILITIES
@@ -130,10 +127,11 @@ function startLoading() {
     `<div class="skeleton"><div class="bar wide"></div><div class="bar mid"></div><div class="bar short"></div></div>`
   ).join('');
 
+  loadingStage = 'Matching the title on MangaDex…';
   const started = Date.now();
   const tick = () => {
     const seconds = Math.floor((Date.now() - started) / 1000);
-    const step = LOADING_STEPS.filter(([at]) => seconds >= at).pop()[1];
+    const step = seconds >= SLOW_SEARCH_SECONDS ? 'Still verifying pages, almost there…' : loadingStage;
     statusEl.innerHTML = `<div class="spinner"></div><span>${esc(step)}</span><span class="elapsed">${seconds}s</span>`;
   };
   tick();
@@ -160,26 +158,66 @@ async function doSearch(forceRefresh = false) {
     }
   }
 
+  // A new search cancels the one still streaming
+  if (searchController) searchController.abort();
+  const controller = searchController = new AbortController();
+
   startLoading();
   try {
-    const resp = await fetch('/api/search', {
+    const resp = await fetch('/api/search/stream', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query: q, forceRefresh })
+      body: JSON.stringify({ query: q, forceRefresh }),
+      signal: controller.signal
     });
-    const data = await resp.json();
-    if (data.error) throw new Error(data.error);
+    if (!resp.ok) throw new Error((await resp.json().catch(() => ({}))).error || `Search failed (HTTP ${resp.status})`);
 
-    store.cacheSearch(q, data);
-    stopLoading();
-    renderResults(data, q, data.fromCache);
-    store.addHistory(q);
-    renderHistory();
+    // Show the series and direct site lookups as soon as they arrive; Gemini's ranked result comes last
+    const partial = { results: [] };
+    for await (const event of readEvents(resp)) {
+      if (event.type === 'metadata') {
+        loadingStage = 'Searching official publishers and checking links…';
+        Object.assign(partial, event.data);
+        renderResults(partial, q, false, true);
+      } else if (event.type === 'site') {
+        partial.results = [...partial.results, event.data];
+        renderResults(partial, q, false, true);
+      } else if (event.type === 'error') {
+        throw new Error(event.data.message);
+      } else if (event.type === 'done') {
+        store.cacheSearch(q, event.data);
+        stopLoading();
+        renderResults(event.data, q, event.data.fromCache);
+        store.addHistory(q);
+        renderHistory();
+        return;
+      }
+    }
+    throw new Error('The search ended early. Please try again.');
   } catch (err) {
+    if (controller.signal.aborted) return; // superseded by a newer search
     console.error(err);
     stopLoading();
     resultsEl.innerHTML = `<div class="empty"><i class="ti ti-alert-circle" aria-hidden="true"></i>${esc(err.message || 'Something went wrong. Check the console for details.')}</div>`;
   }
+}
+
+/**
+ * Parses a newline-delimited JSON response body into events as chunks arrive.
+ * @param {Response} resp
+ */
+async function* readEvents(resp) {
+  const reader = resp.body.pipeThrough(new TextDecoderStream()).getReader();
+  let buffer = '';
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += value;
+    const lines = buffer.split('\n');
+    buffer = lines.pop();
+    for (const line of lines) if (line.trim()) yield JSON.parse(line);
+  }
+  if (buffer.trim()) yield JSON.parse(buffer);
 }
 
 // ============================================================
@@ -194,8 +232,14 @@ function renderIntro() {
     </div>`;
 }
 
-function renderResults(data, query, cached) {
-  lastRender = [data, query, cached];
+/**
+ * @param {Object} data /api/search result, or the partial one built while streaming
+ * @param {string} query
+ * @param {boolean} cached Show the "saved results" notice
+ * @param {boolean} [pending] Still streaming: official sources aren't in yet, so show a placeholder for them
+ */
+function renderResults(data, query, cached, pending = false) {
+  lastRender = [data, query, cached, pending];
   let html = '';
   // Compacts the hero on phones so results start near the top
   document.body.classList.add('searched');
@@ -212,7 +256,7 @@ function renderResults(data, query, cached) {
   if (data.metadata) html += seriesCard(data);
 
   const results = data.results || [];
-  if (!results.length) {
+  if (!results.length && !pending) {
     html += `<div class="empty"><i class="ti ti-ghost" aria-hidden="true"></i>
       No verified reading sites for <strong>${esc(data.searchTitle || query)}</strong>.<br>
       <span class="muted">Try the Japanese/Korean name, or another title above.</span></div>`;
@@ -225,18 +269,24 @@ function renderResults(data, query, cached) {
   const official = results.filter(r => r.official === true);
   const other = results.filter(r => r.official !== true);
   const shown = officialOnly ? official : results;
-  const top = shown[0] && !(shown[0].notes && shown[0].notes.includes('Unverified')) ? shown[0] : null;
+  // No "Top pick" until the final ranking is in
+  const top = !pending && shown[0] && !(shown[0].notes && shown[0].notes.includes('Unverified')) ? shown[0] : null;
 
   html += `<div class="results-bar">
-    <span class="muted">${shown.length} of ${results.length} sources</span>
+    <span class="muted">${pending ? `${shown.length} found so far` : `${shown.length} of ${results.length} sources`}</span>
     <label class="switch"><input type="checkbox" id="officialOnly" ${officialOnly ? 'checked' : ''}><span class="switch-track" aria-hidden="true"></span> Official only</label>
   </div>`;
 
-  if (official.length) {
+  if (pending) {
+    html += `<section class="group">
+      <div class="group-head"><h2>Official</h2><span class="muted">Searching publishers and checking links…</span></div>
+      <div class="result-list"><div class="skeleton"><div class="bar wide"></div><div class="bar mid"></div><div class="bar short"></div></div></div>
+    </section>`;
+  } else if (official.length) {
     html += resultGroup('Official', 'Licensed publishers and platforms', official, top, fallbackTitle);
   }
   if (officialOnly) {
-    if (!official.length) {
+    if (!official.length && !pending) {
       html += `<div class="empty"><i class="ti ti-shield-off" aria-hidden="true"></i>No official sources found for this title.<br>
         <span class="muted">Turn off “Official only” to see ${other.length} other source${other.length === 1 ? '' : 's'}.</span></div>`;
     }

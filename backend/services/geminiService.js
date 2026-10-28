@@ -83,8 +83,10 @@ function hostOf(url) {
  * Searches Gemini and known aggregator sites in parallel, then runs Gemini's links through the fallback chain
  * @param {string} query
  * @param {boolean} forceRefresh
+ * @param {(type: 'metadata'|'site', data: Object) => void} [onProgress] Called as partial results become
+ *   available, so callers can stream them (MangaDex and site lookups finish long before Gemini)
  */
-async function searchManga(query, forceRefresh = false) {
+async function searchManga(query, forceRefresh = false, onProgress = () => {}) {
   const API_KEY = process.env.GEMINI_API_KEY;
   if (!API_KEY) {
     throw new Error('GEMINI_API_KEY is not set in the environment');
@@ -93,6 +95,7 @@ async function searchManga(query, forceRefresh = false) {
   // Phase 2: Title Normalization via MangaDex
   const metadata = await mangadexService.searchManga(query);
   const searchTitle = metadata ? metadata.title : query;
+  onProgress('metadata', { query, searchTitle, metadata });
 
   // Phase 4: Backend Caching
   if (!forceRefresh) {
@@ -116,7 +119,7 @@ async function searchManga(query, forceRefresh = false) {
     fetchGeminiCandidates(searchTitle, API_KEY)
       .then(candidates => Promise.all(candidates.map(c => validateCandidate(c, titles))))
       .catch(err => ({ error: err })),
-    siteFamilyService.findOnSites(query, metadata)
+    siteFamilyService.findOnSites(query, metadata, result => onProgress('site', result))
   ]);
 
   if (geminiOutcome.error) {
