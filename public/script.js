@@ -7,7 +7,6 @@ import { store } from './store.mjs';
 
 const $ = id => document.getElementById(id);
 const inp = $('inp');
-const searchBtn = $('searchBtn');
 const themeBtn = $('themeBtn');
 const statusEl = $('status');
 const resultsEl = $('results');
@@ -123,7 +122,7 @@ function fillAndSearch(q) {
 // ============================================================
 
 function startLoading() {
-  searchBtn.disabled = true;
+  // Find stays enabled: a new search cancels this one, and a disabled submit button would block Enter
   document.body.classList.add('searched');
   window.scrollTo({ top: 0 });
   resultsEl.innerHTML = Array.from({ length: 3 }, () =>
@@ -131,6 +130,7 @@ function startLoading() {
   ).join('');
 
   loadingStage = 'Matching the title on MangaDex…';
+  clearInterval(loadingTimer);
   const started = Date.now();
   const tick = () => {
     const seconds = Math.floor((Date.now() - started) / 1000);
@@ -144,13 +144,22 @@ function startLoading() {
 function stopLoading() {
   clearInterval(loadingTimer);
   statusEl.innerHTML = '';
-  searchBtn.disabled = false;
+}
+
+// Cancels a search that is still streaming. Its own error handler returns early on abort,
+// so the loading state (status timer) has to be cleared here.
+function cancelSearch() {
+  if (!searchController) return;
+  searchController.abort();
+  searchController = null;
+  stopLoading();
 }
 
 async function doSearch(forceRefresh = false) {
   closeSuggestions();
   const q = inp.value.trim();
   if (!q) return;
+  cancelSearch();
 
   if (!forceRefresh) {
     const cached = store.getCachedSearch(q);
@@ -162,8 +171,6 @@ async function doSearch(forceRefresh = false) {
     }
   }
 
-  // A new search cancels the one still streaming
-  if (searchController) searchController.abort();
   const controller = searchController = new AbortController();
 
   startLoading();
@@ -203,6 +210,8 @@ async function doSearch(forceRefresh = false) {
     console.error(err);
     stopLoading();
     resultsEl.innerHTML = `<div class="empty"><i class="ti ti-alert-circle" aria-hidden="true"></i>${esc(err.message || 'Something went wrong. Check the console for details.')}</div>`;
+  } finally {
+    if (searchController === controller) searchController = null; // finished, nothing left to cancel
   }
 }
 
