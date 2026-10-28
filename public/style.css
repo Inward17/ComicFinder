@@ -226,6 +226,20 @@ a { color: inherit; }
 .btn-danger:hover { color: var(--accent); border-color: var(--accent); }
 
 /* ---------- Results ---------- */
+.results-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.switch { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 500; cursor: pointer; user-select: none; min-height: 40px; }
+.switch input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.switch-track {
+  position: relative; width: 38px; height: 22px; border-radius: 999px;
+  background: var(--border); transition: background 0.15s; flex-shrink: 0;
+}
+.switch-track::after {
+  content: ''; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%;
+  background: var(--surface); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3); transition: transform 0.15s;
+}
+.switch input:checked + .switch-track { background: var(--accent); }
+.switch input:checked + .switch-track::after { transform: translateX(16px); }
+.switch input:focus-visible + .switch-track { outline: 2px solid var(--accent); outline-offset: 2px; }
 .group { margin-bottom: 24px; }
 .group-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px; }
 .group-head h2 { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 1.2px; }

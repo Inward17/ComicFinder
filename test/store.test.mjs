@@ -48,6 +48,9 @@ test('bookmarks round-trip, update and remove', () => {
   assert.strictEqual(store.getBookmark('x').hasNewChapter, true);
   store.removeBookmark('x');
   assert.strictEqual(store.hasBookmark('x'), false);
+  assert.strictEqual(store.getOfficialOnly(), false);
+  store.setOfficialOnly(true);
+  assert.strictEqual(store.getOfficialOnly(), true);
   assert.throws(() => store.addBookmark({ id: 'y' }), /no title/);
 });
 

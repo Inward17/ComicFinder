@@ -30,6 +30,8 @@ const LOADING_STEPS = [
 // Series shown in the current results, used when bookmarking it
 let currentSeries = null;
 let loadingTimer = null;
+// Arguments of the last renderResults call, so filters can re-render without searching again
+let lastRender = null;
 
 // ============================================================
 // UTILITIES
@@ -193,6 +195,7 @@ function renderIntro() {
 }
 
 function renderResults(data, query, cached) {
+  lastRender = [data, query, cached];
   let html = '';
   // Compacts the hero on phones so results start near the top
   document.body.classList.add('searched');
@@ -218,14 +221,26 @@ function renderResults(data, query, cached) {
   }
 
   const fallbackTitle = data.searchTitle || query;
-  const top = results[0].notes && results[0].notes.includes('Unverified') ? null : results[0];
+  const officialOnly = store.getOfficialOnly();
   const official = results.filter(r => r.official === true);
   const other = results.filter(r => r.official !== true);
+  const shown = officialOnly ? official : results;
+  const top = shown[0] && !(shown[0].notes && shown[0].notes.includes('Unverified')) ? shown[0] : null;
+
+  html += `<div class="results-bar">
+    <span class="muted">${shown.length} of ${results.length} sources</span>
+    <label class="switch"><input type="checkbox" id="officialOnly" ${officialOnly ? 'checked' : ''}><span class="switch-track" aria-hidden="true"></span> Official only</label>
+  </div>`;
 
   if (official.length) {
     html += resultGroup('Official', 'Licensed publishers and platforms', official, top, fallbackTitle);
   }
-  if (other.length) {
+  if (officialOnly) {
+    if (!official.length) {
+      html += `<div class="empty"><i class="ti ti-shield-off" aria-hidden="true"></i>No official sources found for this title.<br>
+        <span class="muted">Turn off “Official only” to see ${other.length} other source${other.length === 1 ? '' : 's'}.</span></div>`;
+    }
+  } else if (other.length) {
     html += resultGroup('Other sources', 'Fan translations and aggregators, unofficial', other, top, fallbackTitle);
   }
   resultsEl.innerHTML = html;
@@ -543,6 +558,15 @@ document.addEventListener('click', e => {
   else if (action === 'go-search') { switchView('search'); inp.focus(); }
   else if (action === 'export-watchlist') exportWatchlist();
   else if (action === 'import-watchlist') $('importFile').click();
+});
+
+resultsEl.addEventListener('change', e => {
+  if (e.target.id !== 'officialOnly' || !lastRender) return;
+  store.setOfficialOnly(e.target.checked);
+  const y = window.scrollY;
+  renderResults(...lastRender);
+  window.scrollTo({ top: y });
+  $('officialOnly').focus();
 });
 
 $('importFile').addEventListener('change', e => {

@@ -35,6 +35,7 @@ const emptyDb = () => ({
   bookmarks: {},
   history: [],
   theme: null,
+  officialOnly: false,
   searchCache: {}
 });
 
@@ -110,6 +111,7 @@ function read() {
       bookmarks: cleanBookmarks(parsed.bookmarks),
       history: Array.isArray(parsed.history) ? parsed.history.filter(h => typeof h === 'string') : [],
       theme: parsed.theme === 'dark' || parsed.theme === 'light' ? parsed.theme : null,
+      officialOnly: parsed.officialOnly === true,
       searchCache: parsed.searchCache && typeof parsed.searchCache === 'object' ? parsed.searchCache : {}
     };
   } catch {
@@ -221,6 +223,17 @@ export const store = {
   },
 
   /** @returns {'dark'|'light'|null} null means follow the system setting */
+  /** True when only licensed sources should be shown */
+  getOfficialOnly() {
+    return read().officialOnly;
+  },
+
+  setOfficialOnly(on) {
+    const db = read();
+    db.officialOnly = !!on;
+    write(db);
+  },
+
   getTheme() {
     return read().theme;
   },
