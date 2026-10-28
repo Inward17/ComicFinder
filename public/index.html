@@ -44,9 +44,11 @@
       <p>Official sites first, every link checked. Manga, manhwa and manhua.</p>
       <form class="search" id="searchForm" role="search">
         <i class="ti ti-search search-icon" aria-hidden="true"></i>
-        <input type="search" id="inp" placeholder="Search a title, e.g. Solo Leveling" autocomplete="off" autocapitalize="off" enterkeyhint="search" aria-label="Manga title" maxlength="200" />
+        <input type="search" id="inp" placeholder="Search a title, e.g. Solo Leveling" autocomplete="off" autocapitalize="off" enterkeyhint="search" aria-label="Manga title" maxlength="200"
+          role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="suggestions" />
         <kbd class="search-kbd" aria-hidden="true">/</kbd>
         <button type="submit" id="searchBtn">Find</button>
+        <ul id="suggestions" class="suggestions" role="listbox" aria-label="Title suggestions" hidden></ul>
       </form>
       <div class="history" id="historySection" hidden>
         <span class="history-label">Recent</span>

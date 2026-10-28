@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const geminiService = require('../services/geminiService');
+const mangadexService = require('../services/mangadexService');
 
 const MAX_QUERY_LENGTH = 200;
 const RATE_WINDOW_MS = 60 * 1000;
@@ -105,6 +106,25 @@ router.post('/search/stream', searchLimit, async (req, res) => {
     send('error', { message: error.message || 'Internal Server Error' });
   }
   res.end();
+});
+
+// Fires while typing (debounced in the UI), so it gets its own, looser allowance.
+// ponytail: MangaDex allows ~5 req/s per server IP; the cache absorbs repeats, a queue would be next.
+const suggestLimit = createRateLimit(60, 'Too many requests. Slow down a little.');
+const MIN_SUGGEST_LENGTH = 2;
+const MAX_SUGGEST_LENGTH = 100;
+
+// GET /api/suggest?q=solo
+// Returns [{ id, title, year, status, coverUrl }]
+router.get('/suggest', suggestLimit, async (req, res) => {
+  const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+  if (q.length < MIN_SUGGEST_LENGTH || q.length > MAX_SUGGEST_LENGTH) return res.json([]);
+  try {
+    res.set('Cache-Control', 'public, max-age=3600').json(await mangadexService.suggest(q));
+  } catch (error) {
+    console.error("Suggest Route Error:", error.message);
+    res.status(502).json({ error: 'Suggestions are unavailable right now' });
+  }
 });
 
 module.exports = router;

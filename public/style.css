@@ -131,6 +131,22 @@ a { color: inherit; }
 .search button:hover { background: var(--accent-hover); }
 .search button:disabled { opacity: 0.6; cursor: progress; }
 
+.suggestions {
+  position: absolute; top: calc(100% + 10px); left: -2px; right: -2px; z-index: 5;
+  list-style: none; max-height: min(420px, 60vh); overflow-y: auto; padding: 6px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow);
+}
+.suggestion {
+  display: flex; align-items: center; gap: 12px; padding: 6px 8px; border-radius: 10px; cursor: pointer;
+}
+.suggestion[aria-selected="true"] { background: var(--surface-2); }
+@media (hover: hover) { .suggestion:hover { background: var(--surface-2); } }
+.suggestion img, .suggestion .thumb {
+  width: 36px; height: 54px; object-fit: cover; border-radius: 6px; flex-shrink: 0; background: var(--surface-2);
+}
+.suggestion-title { font-weight: 700; font-size: 14px; line-height: 1.3; }
+.suggestion-meta { font-size: 12px; color: var(--muted); }
+
 .history { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
 .history-label { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); }
 

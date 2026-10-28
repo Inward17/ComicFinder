@@ -18,9 +18,12 @@ const bookmarksView = $('bookmarksView');
 const bookmarksGrid = $('bookmarksGrid');
 const bookmarkCount = $('bookmarkCount');
 const checkAllBtn = $('checkAllBtn');
+const suggestEl = $('suggestions');
 
 const SUGGESTIONS = ['Solo Leveling', 'One Piece', 'Omniscient Reader', 'Frieren'];
 const SLOW_SEARCH_SECONDS = 20;
+const SUGGEST_MIN_LENGTH = 2;
+const SUGGEST_DELAY_MS = 200;
 
 // Series shown in the current results, used when bookmarking it
 let currentSeries = null;
@@ -145,6 +148,7 @@ function stopLoading() {
 }
 
 async function doSearch(forceRefresh = false) {
+  closeSuggestions();
   const q = inp.value.trim();
   if (!q) return;
 
@@ -391,6 +395,106 @@ function resultCard(s, isTop, fallbackTitle) {
   html += `</div></article>`;
   return html;
 }
+
+// ============================================================
+// AUTOCOMPLETE
+// ============================================================
+
+let suggestions = [];
+let activeSuggestion = -1;
+let suggestTimer = null;
+let suggestController = null;
+
+function closeSuggestions() {
+  clearTimeout(suggestTimer);
+  if (suggestController) suggestController.abort();
+  suggestions = [];
+  activeSuggestion = -1;
+  suggestEl.hidden = true;
+  suggestEl.innerHTML = '';
+  inp.setAttribute('aria-expanded', 'false');
+  inp.removeAttribute('aria-activedescendant');
+}
+
+function renderSuggestions() {
+  if (!suggestions.length) {
+    closeSuggestions();
+    return;
+  }
+  suggestEl.innerHTML = suggestions.map((s, i) => {
+    const meta = [s.year, s.status && s.status[0].toUpperCase() + s.status.slice(1)].filter(Boolean).join(' · ');
+    return `<li class="suggestion" role="option" id="suggestion-${i}" data-index="${i}" aria-selected="${i === activeSuggestion}">
+      ${s.coverUrl ? `<img src="${esc(safeUrl(s.coverUrl))}" alt="" loading="lazy">` : '<span class="thumb"></span>'}
+      <span><span class="suggestion-title">${esc(s.title)}</span><br><span class="suggestion-meta">${esc(meta)}</span></span>
+    </li>`;
+  }).join('');
+  suggestEl.hidden = false;
+  inp.setAttribute('aria-expanded', 'true');
+  if (activeSuggestion >= 0) {
+    inp.setAttribute('aria-activedescendant', `suggestion-${activeSuggestion}`);
+    $(`suggestion-${activeSuggestion}`).scrollIntoView({ block: 'nearest' });
+  } else {
+    inp.removeAttribute('aria-activedescendant');
+  }
+}
+
+async function loadSuggestions(q) {
+  if (suggestController) suggestController.abort();
+  const controller = suggestController = new AbortController();
+  try {
+    const resp = await fetch(`/api/suggest?q=${encodeURIComponent(q)}`, { signal: controller.signal });
+    if (!resp.ok) return;
+    const data = await resp.json();
+    // Ignore answers for text the user has since changed, or after they left the box
+    if (inp.value.trim() !== q || document.activeElement !== inp) return;
+    suggestions = data;
+    activeSuggestion = -1;
+    renderSuggestions();
+  } catch {
+    // Aborted or offline: just no suggestions
+  }
+}
+
+function chooseSuggestion(index) {
+  const s = suggestions[index];
+  if (!s) return;
+  inp.value = s.title;
+  doSearch();
+}
+
+inp.addEventListener('input', () => {
+  clearTimeout(suggestTimer);
+  const q = inp.value.trim();
+  if (q.length < SUGGEST_MIN_LENGTH) {
+    closeSuggestions();
+    return;
+  }
+  suggestTimer = setTimeout(() => loadSuggestions(q), SUGGEST_DELAY_MS);
+});
+
+inp.addEventListener('keydown', e => {
+  if (suggestEl.hidden) return;
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    const n = suggestions.length;
+    activeSuggestion = e.key === 'ArrowDown' ? (activeSuggestion + 1) % n : (activeSuggestion - 1 + n) % n;
+    renderSuggestions();
+  } else if (e.key === 'Enter' && activeSuggestion >= 0) {
+    e.preventDefault();
+    chooseSuggestion(activeSuggestion);
+  } else if (e.key === 'Escape') {
+    closeSuggestions();
+  }
+});
+
+// mousedown rather than click, so the input doesn't blur (and close the list) before the choice registers
+suggestEl.addEventListener('mousedown', e => {
+  const item = e.target.closest('.suggestion');
+  if (!item) return;
+  e.preventDefault();
+  chooseSuggestion(Number(item.dataset.index));
+});
+inp.addEventListener('blur', closeSuggestions);
 
 // ============================================================
 // HISTORY
