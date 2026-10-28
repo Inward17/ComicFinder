@@ -422,6 +422,32 @@ function renderBookmarks() {
   }).join('');
 }
 
+function exportWatchlist() {
+  const backup = store.exportBookmarks();
+  if (!backup.bookmarks.length) {
+    toast('Your watchlist is empty, nothing to export.');
+    return;
+  }
+  const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = `mangafinder-watchlist-${backup.exportedAt.slice(0, 10)}.json`;
+  link.click();
+  URL.revokeObjectURL(link.href);
+  toast(`Exported ${backup.bookmarks.length} series`);
+}
+
+async function importWatchlist(file) {
+  try {
+    const { added, skipped } = store.importBookmarks(JSON.parse(await file.text()));
+    updateBookmarkBadge();
+    renderBookmarks();
+    toast(`Imported ${added} series${skipped ? `, skipped ${skipped} already saved or invalid` : ''}`);
+  } catch (err) {
+    toast(err instanceof SyntaxError ? 'That file is not valid JSON.' : err.message);
+  }
+}
+
 async function checkAllUpdates() {
   const bookmarks = store.listBookmarks();
   if (!bookmarks.length) return;
@@ -515,6 +541,14 @@ document.addEventListener('click', e => {
   else if (action === 'search') fillAndSearch(query);
   else if (action === 'clear-history') { store.clearHistory(); renderHistory(); }
   else if (action === 'go-search') { switchView('search'); inp.focus(); }
+  else if (action === 'export-watchlist') exportWatchlist();
+  else if (action === 'import-watchlist') $('importFile').click();
+});
+
+$('importFile').addEventListener('change', e => {
+  const file = e.target.files[0];
+  e.target.value = ''; // allow re-importing the same file
+  if (file) importWatchlist(file);
 });
 
 // ============================================================

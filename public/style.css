@@ -267,6 +267,7 @@ a { color: inherit; }
 /* ---------- Watchlist ---------- */
 .section-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin: 28px 0 18px; }
 .section-head h2 { font-family: 'Bebas Neue', sans-serif; font-weight: 400; font-size: 40px; letter-spacing: 1px; line-height: 1; }
+.head-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 
 .poster-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 18px; }
 .poster {
@@ -386,7 +387,9 @@ a { color: inherit; }
 
   .section-head { margin-top: 18px; }
   .section-head h2 { font-size: 34px; }
-  .section-head .btn { width: 100%; }
+  .head-actions { width: 100%; }
+  .head-actions .btn { flex: 1; }
+  #checkAllBtn { flex-basis: 100%; }
   .poster-grid { grid-template-columns: repeat(2, 1fr); gap: 12px; }
 
   .toasts { bottom: calc(80px + env(safe-area-inset-bottom)); }

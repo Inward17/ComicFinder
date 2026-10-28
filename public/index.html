@@ -65,7 +65,12 @@
         <h2>Watchlist</h2>
         <p class="muted">Saved in this browser only. No account needed.</p>
       </div>
-      <button id="checkAllBtn" class="btn btn-secondary"><i class="ti ti-refresh" aria-hidden="true"></i> Check for new chapters</button>
+      <div class="head-actions">
+        <button id="checkAllBtn" class="btn btn-secondary"><i class="ti ti-refresh" aria-hidden="true"></i> Check for new chapters</button>
+        <button class="btn btn-secondary" data-action="export-watchlist"><i class="ti ti-download" aria-hidden="true"></i> Export</button>
+        <button class="btn btn-secondary" data-action="import-watchlist"><i class="ti ti-upload" aria-hidden="true"></i> Import</button>
+        <input type="file" id="importFile" accept="application/json,.json" hidden />
+      </div>
     </div>
     <div id="bookmarksGrid" class="poster-grid"></div>
   </section>

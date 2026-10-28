@@ -173,6 +173,36 @@ export const store = {
     write(db);
   },
 
+  /** Watchlist as a portable backup object (the export file's contents). */
+  exportBookmarks() {
+    return {
+      app: 'mangafinder',
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      bookmarks: this.listBookmarks()
+    };
+  },
+
+  /**
+   * Merges bookmarks from an export file. Series already in the watchlist are kept as they are.
+   * @param {unknown} backup Parsed export file (or a bare array of bookmarks)
+   * @returns {{added: number, skipped: number}}
+   */
+  importBookmarks(backup) {
+    const list = Array.isArray(backup) ? backup : backup && Array.isArray(backup.bookmarks) ? backup.bookmarks : null;
+    if (!list) throw new Error('Not a MangaFinder watchlist file');
+
+    const db = read();
+    let added = 0;
+    for (const b of list) {
+      if (bookmarkProblem(b) || db.bookmarks[b.id]) continue;
+      db.bookmarks[b.id] = { ...b, addedAt: Number(b.addedAt) || Date.now() };
+      added++;
+    }
+    write(db);
+    return { added, skipped: list.length - added };
+  },
+
   /** @returns {string[]} most recent first */
   listHistory() {
     return read().history;

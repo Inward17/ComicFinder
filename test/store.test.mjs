@@ -51,6 +51,23 @@ test('bookmarks round-trip, update and remove', () => {
   assert.throws(() => store.addBookmark({ id: 'y' }), /no title/);
 });
 
+test('export/import round-trips and merges without overwriting', () => {
+  globalThis.localStorage = fakeStorage();
+  store.addBookmark({ id: 'a', title: 'One Piece', lastChapter: 1196 });
+  store.addBookmark({ id: 'b', title: 'Berserk' });
+  const backup = JSON.parse(JSON.stringify(store.exportBookmarks()));
+  assert.strictEqual(backup.app, 'mangafinder');
+  assert.strictEqual(backup.bookmarks.length, 2);
+
+  globalThis.localStorage = fakeStorage();
+  store.addBookmark({ id: 'a', title: 'One Piece', lastChapter: 1200 }); // newer local copy wins
+  const result = store.importBookmarks({ ...backup, bookmarks: [...backup.bookmarks, { title: 'no id' }] });
+  assert.deepStrictEqual(result, { added: 1, skipped: 2 });
+  assert.strictEqual(store.getBookmark('a').lastChapter, 1200);
+  assert.ok(store.hasBookmark('b'));
+  assert.throws(() => store.importBookmarks({ hello: 'world' }), /Not a MangaFinder watchlist/);
+});
+
 test('search cache keeps only the 30 most recent entries', () => {
   globalThis.localStorage = fakeStorage();
   for (let i = 0; i < 35; i++) store.cacheSearch(`q${i}`, { i });
