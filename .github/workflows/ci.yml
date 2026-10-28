@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [20, 22]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - run: npm ci
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Frontend syntax check
+        # script.js is an ES module but the package is CommonJS, so check it under an .mjs name
+        run: |
+          for f in public/script.js public/store.mjs; do
+            cp "$f" "$RUNNER_TEMP/$(basename "${f%.*}").mjs"
+            node --check "$RUNNER_TEMP/$(basename "${f%.*}").mjs"
+          done
+
+      - name: Smoke test the server
+        run: |
+          PORT=3999 node backend/server.js &
+          for i in $(seq 1 30); do curl -sf http://localhost:3999/ > /dev/null && break; sleep 0.5; done
+          check() { code=$(curl -s -o /dev/null -w '%{http_code}' "$@"); echo "$code $*"; [ "$code" = "$EXPECT" ]; }
+          EXPECT=200 check http://localhost:3999/
+          EXPECT=200 check http://localhost:3999/store.mjs
+          EXPECT=404 check http://localhost:3999/package.json
+          EXPECT=400 check -X POST -H 'Content-Type: application/json' -d '{}' http://localhost:3999/api/search

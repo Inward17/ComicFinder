@@ -24,6 +24,9 @@
   "author": "Inward17",
   "license": "MIT",
   "type": "commonjs",
+  "engines": {
+    "node": ">=20"
+  },
   "bugs": {
     "url": "https://github.com/Inward17/ComicFinder/issues"
   },
