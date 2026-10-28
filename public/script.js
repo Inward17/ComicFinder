@@ -737,6 +737,78 @@ async function importWatchlist(file) {
   }
 }
 
+const anilistDialog = $('anilistDialog');
+let anilistController = null;
+
+function openAniListImport() {
+  $('anilistStatus').innerHTML = '';
+  $('anilistClose').textContent = 'Cancel';
+  anilistDialog.showModal();
+  $('anilistUser').focus();
+}
+
+function closeAniListImport() {
+  if (anilistController) anilistController.abort();
+  anilistController = null;
+  anilistDialog.close();
+}
+
+async function importFromAniList() {
+  const statusBox = $('anilistStatus');
+  const submit = $('anilistSubmit');
+  const controller = anilistController = new AbortController();
+  submit.disabled = true;
+  statusBox.textContent = 'Reading your AniList list…';
+
+  try {
+    const resp = await fetch('/api/import/anilist', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: $('anilistUser').value.trim(), includeCompleted: $('anilistCompleted').checked }),
+      signal: controller.signal
+    });
+    if (!resp.ok) throw new Error((await resp.json().catch(() => ({}))).error || `Import failed (HTTP ${resp.status})`);
+
+    for await (const event of readEvents(resp)) {
+      if (event.type === 'progress') {
+        statusBox.textContent = `Matching ${event.data.done} of ${event.data.total} on MangaDex…`;
+      } else if (event.type === 'error') {
+        throw new Error(event.data.message);
+      } else if (event.type === 'done') {
+        const { bookmarks, notFound, truncated } = event.data;
+        const { added, skipped } = store.importBookmarks(bookmarks);
+        updateBookmarkBadge();
+        renderBookmarks();
+        let html = `Added ${added} series${skipped ? `, ${skipped} already in your watchlist` : ''}.`;
+        if (truncated) html += ' Only the first 300 series were imported.';
+        if (notFound.length) {
+          html += `<details><summary>${notFound.length} not found on MangaDex</summary>
+            <ul>${notFound.map(t => `<li>${esc(t)}</li>`).join('')}</ul></details>`;
+        }
+        statusBox.innerHTML = html;
+        $('anilistClose').textContent = 'Close';
+        return;
+      }
+    }
+    throw new Error('The import ended early. Please try again.');
+  } catch (err) {
+    if (controller.signal.aborted) return;
+    statusBox.textContent = err.message;
+  } finally {
+    submit.disabled = false;
+    if (anilistController === controller) anilistController = null;
+  }
+}
+
+$('anilistForm').addEventListener('submit', e => {
+  e.preventDefault();
+  importFromAniList();
+});
+// Esc closes the dialog; stop an import that is still running
+anilistDialog.addEventListener('cancel', () => {
+  if (anilistController) anilistController.abort();
+});
+
 async function checkAllUpdates() {
   const bookmarks = store.listBookmarks();
   if (!bookmarks.length) return;
@@ -832,6 +904,8 @@ document.addEventListener('click', e => {
   else if (action === 'go-search') { switchView('search'); inp.focus(); }
   else if (action === 'export-watchlist') exportWatchlist();
   else if (action === 'import-watchlist') $('importFile').click();
+  else if (action === 'open-anilist') openAniListImport();
+  else if (action === 'close-anilist') closeAniListImport();
 });
 
 resultsEl.addEventListener('change', e => {

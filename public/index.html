@@ -74,14 +74,31 @@
         <button id="checkAllBtn" class="btn btn-secondary"><i class="ti ti-refresh" aria-hidden="true"></i> Check for new chapters</button>
         <button class="btn btn-secondary" data-action="export-watchlist"><i class="ti ti-download" aria-hidden="true"></i> Export</button>
         <button class="btn btn-secondary" data-action="import-watchlist"><i class="ti ti-upload" aria-hidden="true"></i> Import</button>
+        <button class="btn btn-secondary" data-action="open-anilist"><i class="ti ti-users" aria-hidden="true"></i> From AniList</button>
         <input type="file" id="importFile" accept="application/json,.json" hidden />
       </div>
     </div>
-    <p class="muted import-hint"><i class="ti ti-info-circle" aria-hidden="true"></i> Import takes a <code>.json</code> file made with Export (<code>mangafinder-watchlist-YYYY-MM-DD.json</code>), for example from another browser or device. Series you already have are kept.</p>
+    <p class="muted import-hint"><i class="ti ti-info-circle" aria-hidden="true"></i> Import takes a <code>.json</code> file made with Export (<code>mangafinder-watchlist-YYYY-MM-DD.json</code>), for example from another browser or device. To bring in a list from AniList, use From AniList. Series you already have are kept.</p>
     <div id="bookmarksGrid" class="poster-grid"></div>
   </section>
 
 </main>
+
+<dialog id="anilistDialog" class="dialog" aria-labelledby="anilistTitle">
+  <form id="anilistForm">
+    <h3 id="anilistTitle">Import from AniList</h3>
+    <p class="muted">Your AniList manga list must be public. Each series is matched to MangaDex; any it doesn't have are listed after the import.</p>
+    <label class="field">AniList username
+      <input type="text" id="anilistUser" required pattern="[A-Za-z0-9_\-]{2,30}" autocomplete="username" autocapitalize="off" spellcheck="false" />
+    </label>
+    <label class="check"><input type="checkbox" id="anilistCompleted" /> Also import completed series</label>
+    <div id="anilistStatus" class="muted dialog-status" aria-live="polite"></div>
+    <div class="dialog-actions">
+      <button type="button" class="btn btn-secondary" data-action="close-anilist" id="anilistClose">Cancel</button>
+      <button type="submit" class="btn btn-primary" id="anilistSubmit">Import</button>
+    </div>
+  </form>
+</dialog>
 
 <div id="toasts" class="toasts" aria-live="polite"></div>
 

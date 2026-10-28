@@ -201,8 +201,41 @@ async function suggest(query) {
   return suggestions;
 }
 
+/**
+ * Finds the MangaDex entry for a series from another list site, verified by the external IDs
+ * MangaDex stores in `links` (al = AniList, mal = MyAnimeList). Title search only finds
+ * candidates; a candidate counts only if its stored ID matches, so there are no fuzzy mismatches.
+ * @param {{anilistId?: number|null, malId?: number|null, titles: string[]}} series
+ * @returns {Promise<{id: string, coverUrl: string|null}|null>}
+ */
+async function findByExternalId({ anilistId, malId, titles }) {
+  const al = anilistId ? String(anilistId) : null;
+  const mal = malId ? String(malId) : null;
+
+  for (const title of titles.filter(Boolean).slice(0, 2)) {
+    const url = new URL('https://api.mangadex.org/manga');
+    url.searchParams.append('title', title);
+    url.searchParams.append('limit', '10');
+    url.searchParams.append('includes[]', 'cover_art');
+    const response = await fetch(url.toString(), {
+      headers: { 'User-Agent': 'MangaFinderBot/2.0' },
+      signal: AbortSignal.timeout(8000)
+    });
+    if (response.status === 429) throw new Error('MangaDex rate limit reached');
+    if (!response.ok) continue;
+    const data = await response.json();
+    const hit = (data.data || []).find(m => {
+      const links = m.attributes.links || {};
+      return (al && links.al === al) || (mal && links.mal === mal);
+    });
+    if (hit) return { id: hit.id, coverUrl: coverUrlOf(hit) };
+  }
+  return null;
+}
+
 module.exports = {
   titleScore,
   searchManga,
-  suggest
+  suggest,
+  findByExternalId
 };

@@ -3,6 +3,7 @@ const router = express.Router();
 const geminiService = require('../services/geminiService');
 const mangadexService = require('../services/mangadexService');
 const imageSearchService = require('../services/imageSearchService');
+const anilistService = require('../services/anilistService');
 
 const MAX_QUERY_LENGTH = 200;
 const RATE_WINDOW_MS = 60 * 1000;
@@ -143,6 +144,38 @@ router.post('/image-search', imageLimit, async (req, res) => {
     console.error("Image Search Error:", error.message);
     res.status(500).json({ error: error.message || 'Image search failed' });
   }
+});
+
+// Each import makes up to ~2 MangaDex requests per series
+const importLimit = createRateLimit(3, 'Too many imports. Please wait a minute and try again.');
+
+// POST /api/import/anilist
+// Body: { username: "name", includeCompleted?: boolean }
+// Streams newline-delimited JSON like /api/search/stream:
+//   {"type":"progress","data":{done, total}}
+//   {"type":"done","data":{bookmarks, notFound, truncated}}
+//   {"type":"error","data":{"message":"..."}}
+router.post('/import/anilist', importLimit, async (req, res) => {
+  const { username, includeCompleted } = req.body || {};
+
+  res.status(200).set({
+    'Content-Type': 'application/x-ndjson; charset=utf-8',
+    'Cache-Control': 'no-cache',
+    'X-Accel-Buffering': 'no'
+  });
+  res.flushHeaders();
+  const send = (type, data) => {
+    if (!res.writableEnded && !res.destroyed) res.write(JSON.stringify({ type, data }) + '\n');
+  };
+
+  try {
+    const result = await anilistService.importList(username, { includeCompleted: !!includeCompleted }, p => send('progress', p));
+    send('done', result);
+  } catch (error) {
+    if (error.code !== 'IMPORT_USER') console.error("AniList Import Error:", error.message);
+    send('error', { message: error.message || 'Import failed' });
+  }
+  res.end();
 });
 
 module.exports = router;
