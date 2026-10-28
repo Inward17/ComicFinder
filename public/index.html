@@ -41,12 +41,14 @@
   <section id="searchView">
     <div class="hero">
       <h1>Find where to read it.</h1>
-      <p>Official sites first, every link checked. Manga, manhwa and manhua.</p>
+      <p>Official sites first, every link checked. Search by title, or drop in a page, panel or cover.</p>
       <form class="search" id="searchForm" role="search">
         <i class="ti ti-search search-icon" aria-hidden="true"></i>
         <input type="search" id="inp" placeholder="Search a title, e.g. Solo Leveling" autocomplete="off" autocapitalize="off" enterkeyhint="search" aria-label="Manga title" maxlength="200"
           role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="suggestions" />
         <kbd class="search-kbd" aria-hidden="true">/</kbd>
+        <button type="button" class="image-btn" id="imageBtn" aria-label="Search by image" title="Search by image (you can also paste or drop one)"><i class="ti ti-photo-search" aria-hidden="true"></i></button>
+        <input type="file" id="imageFile" accept="image/jpeg,image/png,image/webp" hidden />
         <button type="submit" id="searchBtn">Find</button>
         <ul id="suggestions" class="suggestions" role="listbox" aria-label="Title suggestions" hidden></ul>
       </form>
@@ -58,6 +60,7 @@
     </div>
 
     <div id="status" class="status" role="status" aria-live="polite"></div>
+    <div id="imageNotice" aria-live="polite"></div>
     <div id="results"></div>
   </section>
 

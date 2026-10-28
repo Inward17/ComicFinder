@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const geminiService = require('../services/geminiService');
 const mangadexService = require('../services/mangadexService');
+const imageSearchService = require('../services/imageSearchService');
 
 const MAX_QUERY_LENGTH = 200;
 const RATE_WINDOW_MS = 60 * 1000;
@@ -124,6 +125,23 @@ router.get('/suggest', suggestLimit, async (req, res) => {
   } catch (error) {
     console.error("Suggest Route Error:", error.message);
     res.status(502).json({ error: 'Suggestions are unavailable right now' });
+  }
+});
+
+// Each image search is a vision call (and possibly a SauceNAO lookup, 4 per 30s on the free tier)
+const imageLimit = createRateLimit(6, 'Too many image searches. Please wait a minute and try again.');
+
+// POST /api/image-search
+// Body: { image: "data:image/jpeg;base64,..." } (up to 4 MB; the server.js body limit allows for base64 overhead)
+// Returns { match: { source, title, chapter, confidence, reason } | null }
+router.post('/image-search', imageLimit, async (req, res) => {
+  try {
+    const match = await imageSearchService.identifyImage((req.body || {}).image);
+    res.json({ match });
+  } catch (error) {
+    if (error.code === 'BAD_IMAGE') return res.status(400).json({ error: error.message });
+    console.error("Image Search Error:", error.message);
+    res.status(500).json({ error: error.message || 'Image search failed' });
   }
 });
 

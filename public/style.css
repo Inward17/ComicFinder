@@ -123,12 +123,22 @@ a { color: inherit; }
   font: 500 12px 'DM Sans', sans-serif; color: var(--muted);
   border: 1px solid var(--border); border-radius: 6px; padding: 1px 7px; margin-right: 8px;
 }
-.search button {
+.search .image-btn {
+  width: 44px; padding: 0; margin-right: 6px; flex-shrink: 0; display: grid; place-items: center;
+  background: none; color: var(--muted); font-size: 22px;
+}
+.search .image-btn:hover { background: var(--surface-2); color: var(--text); }
+.hero.dragging { outline: 3px dashed var(--accent); outline-offset: 4px; }
+.image-notice { justify-content: flex-start; gap: 12px; color: var(--text); }
+.image-notice img { width: 44px; height: 60px; object-fit: cover; border-radius: 6px; flex-shrink: 0; }
+.image-notice .spinner { display: inline-block; vertical-align: -3px; margin-right: 6px; }
+.image-notice .muted { display: block; }
+.search button[type="submit"] {
   height: 44px; padding: 0 22px; border: none; border-radius: 10px;
   background: var(--accent); color: var(--on-accent); cursor: pointer;
   font: 700 15px 'DM Sans', sans-serif; transition: background 0.15s;
 }
-.search button:hover { background: var(--accent-hover); }
+.search button[type="submit"]:hover { background: var(--accent-hover); }
 .search button:disabled { opacity: 0.6; cursor: progress; }
 
 .suggestions {
@@ -381,7 +391,7 @@ a { color: inherit; }
   .search { padding-left: 40px; box-shadow: 3px 3px 0 var(--text); }
   .search-icon { left: 14px; }
   .search-kbd { display: none; }
-  .search button { padding: 0 16px; }
+  .search button[type="submit"] { padding: 0 16px; }
 
   /* After a search, shrink the hero to just the search box so results start near the top */
   body.searched .hero { padding: 12px; margin-top: 8px; background-image: none; }

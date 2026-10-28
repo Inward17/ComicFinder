@@ -19,11 +19,15 @@ const bookmarksGrid = $('bookmarksGrid');
 const bookmarkCount = $('bookmarkCount');
 const checkAllBtn = $('checkAllBtn');
 const suggestEl = $('suggestions');
+const imageBtn = $('imageBtn');
+const imageFile = $('imageFile');
+const imageNotice = $('imageNotice');
 
 const SUGGESTIONS = ['Solo Leveling', 'One Piece', 'Omniscient Reader', 'Frieren'];
 const SLOW_SEARCH_SECONDS = 20;
 const SUGGEST_MIN_LENGTH = 2;
 const SUGGEST_DELAY_MS = 200;
+const IMAGE_MAX_SIDE = 1280; // Downscaled in the browser before upload; plenty for recognition
 
 // Series shown in the current results, used when bookmarking it
 let currentSeries = null;
@@ -147,8 +151,13 @@ function stopLoading() {
   searchBtn.disabled = false;
 }
 
-async function doSearch(forceRefresh = false) {
+/**
+ * @param {boolean} [forceRefresh] Skip both caches
+ * @param {{fromImage?: boolean}} [options] fromImage: keep the "identified from your image" notice
+ */
+async function doSearch(forceRefresh = false, { fromImage = false } = {}) {
   closeSuggestions();
+  if (!fromImage) imageNotice.innerHTML = '';
   const q = inp.value.trim();
   if (!q) return;
 
@@ -495,6 +504,108 @@ suggestEl.addEventListener('mousedown', e => {
   chooseSuggestion(Number(item.dataset.index));
 });
 inp.addEventListener('blur', closeSuggestions);
+
+// ============================================================
+// IMAGE SEARCH
+// ============================================================
+
+// Re-encodes as a downscaled JPEG: smaller upload, and strips metadata such as photo location
+async function imageToDataUrl(file) {
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(1, IMAGE_MAX_SIDE / Math.max(bitmap.width, bitmap.height));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(bitmap.width * scale);
+  canvas.height = Math.round(bitmap.height * scale);
+  canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  bitmap.close();
+  return canvas.toDataURL('image/jpeg', 0.85);
+}
+
+function showImageNotice(dataUrl, html) {
+  imageNotice.innerHTML = `<div class="notice image-notice"><img src="${esc(dataUrl)}" alt="Your image"><span>${html}</span></div>`;
+}
+
+async function searchByImage(file) {
+  if (!file || !/^image\/(jpeg|png|webp)$/.test(file.type)) {
+    toast('Choose a JPEG, PNG or WebP image.');
+    return;
+  }
+  closeSuggestions();
+  switchView('search');
+  if (searchController) searchController.abort();
+
+  let dataUrl;
+  try {
+    dataUrl = await imageToDataUrl(file);
+  } catch {
+    toast("Couldn't read that image.");
+    return;
+  }
+
+  showImageNotice(dataUrl, `<span class="spinner"></span>Identifying your image…
+    <span class="muted">Sent to Google Gemini (and SauceNAO, if set up) to identify it. Not stored.</span>`);
+  imageBtn.disabled = true;
+
+  try {
+    const resp = await fetch('/api/image-search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image: dataUrl })
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.error || `Image search failed (HTTP ${resp.status})`);
+
+    const m = data.match;
+    if (!m) {
+      showImageNotice(dataUrl, `Couldn't identify this image.
+        <span class="muted">Try a clearer page, a cover, or type the title instead.</span>`);
+      return;
+    }
+
+    const via = m.source === 'saucenao' ? 'SauceNAO' : 'Gemini';
+    const details = [m.chapter ? `chapter ${m.chapter}` : '', `via ${via}`, m.confidence].filter(Boolean).join(' · ');
+    showImageNotice(dataUrl, `Looks like <strong>${esc(m.title)}</strong> <span class="muted">${esc(details)}${m.reason ? ` — ${esc(m.reason)}` : ''}</span>`);
+    inp.value = m.title;
+    doSearch(false, { fromImage: true });
+  } catch (err) {
+    showImageNotice(dataUrl, `${esc(err.message)}`);
+  } finally {
+    imageBtn.disabled = false;
+  }
+}
+
+imageBtn.addEventListener('click', () => imageFile.click());
+imageFile.addEventListener('change', () => {
+  const file = imageFile.files[0];
+  imageFile.value = ''; // allow choosing the same image again
+  if (file) searchByImage(file);
+});
+
+// Paste an image anywhere (including into the search box)
+document.addEventListener('paste', e => {
+  const file = [...((e.clipboardData && e.clipboardData.files) || [])].find(f => f.type.startsWith('image/'));
+  if (!file) return;
+  e.preventDefault();
+  searchByImage(file);
+});
+
+// Drop an image anywhere on the page
+const hero = document.querySelector('.hero');
+document.addEventListener('dragover', e => {
+  if (!e.dataTransfer || ![...e.dataTransfer.types].includes('Files')) return;
+  e.preventDefault();
+  hero.classList.add('dragging');
+});
+document.addEventListener('dragleave', e => {
+  if (!e.relatedTarget) hero.classList.remove('dragging'); // left the window
+});
+document.addEventListener('drop', e => {
+  hero.classList.remove('dragging');
+  const file = [...((e.dataTransfer && e.dataTransfer.files) || [])][0];
+  if (!file) return;
+  e.preventDefault();
+  searchByImage(file);
+});
 
 // ============================================================
 // HISTORY
