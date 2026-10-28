@@ -2,6 +2,7 @@
 
 > Find where to read any manga, manhwa, or manhua in English. Official sources first, every link checked.
 
+![CI](https://github.com/Inward17/ComicFinder/actions/workflows/ci.yml/badge.svg)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![Node](https://img.shields.io/badge/node-%3E%3D20-brightgreen)
 
@@ -14,11 +15,13 @@ MangaFinder Pro takes a title, works out which series you mean, and returns a sh
 | Feature | Description |
 |---|---|
 | **Smart search** | Google Gemini with grounded web search finds reading sites for the title, and known aggregator sites are queried directly in parallel. |
+| **Instant results** | Results stream in as they are found: the series appears in about half a second and the first reading links within a couple of seconds, while official sources are still being checked. |
+| **Autocomplete** | Title suggestions with covers appear as you type, so you can pick the exact series before searching. |
 | **Verified links** | Each link is fetched and checked: dead pages, homepages, search pages, non-English pages and pages about a different series are dropped. |
-| **Official first** | Results are split into *Official* and *Other sources*, with licensed publishers ranked at the top. |
+| **Official first** | Results are split into *Official* and *Other sources*, with licensed publishers ranked at the top. An *Official only* switch hides everything unofficial. |
 | **Right series** | Titles are matched on MangaDex across English, romanized and alternate names, skipping fan works. A "Not this one?" row lets you switch to a related series. |
 | **Series details** | Cover, author, year, status, genres, synopsis and the latest chapter. |
-| **Watchlist** | Save series in your browser and check them all for new chapters in one click. No account needed. |
+| **Watchlist** | Save series in your browser and check them all for new chapters in one click. Export it to a file and import it in another browser. No account needed. |
 | **Fast repeats** | Results are cached for 24 hours on the server and in the browser. |
 | **Works on phones** | Responsive layout with a bottom tab bar, large tap targets and dark mode. |
 
@@ -50,6 +53,11 @@ Open [http://localhost:3000](http://localhost:3000).
 |---|---|
 | `npm start` | Start the server on port 3000 (override with `PORT`) |
 | `npm test` | Run the test suite (`node --test`) |
+| `npm run check-sites` | Check that every aggregator site still works and report any that moved |
+
+### Continuous integration
+
+GitHub Actions runs the tests, a frontend syntax check and a server smoke test on every push and pull request (Node 20 and 22). A separate workflow checks the aggregator sites every Monday; add `FIRECRAWL_API_KEY` as a repository secret to have Cloudflare-protected sites verified too.
 
 ---
 
@@ -73,13 +81,25 @@ Open [http://localhost:3000](http://localhost:3000).
 4. **Verify every link.** Each page is fetched and must load, still be a series page after redirects, be in English, and mention the title.
 5. **Rank and return.** Official sources first, then other verified links. The result is cached.
 
+Steps 1 and 3 are streamed to the browser as they finish (`POST /api/search/stream`), so the series and direct site links show up long before the slower web search completes.
+
+### API
+
+| Endpoint | Description |
+|---|---|
+| `POST /api/search` | Body `{ "query": "One Piece", "forceRefresh": false }`. Returns the full ranked result. |
+| `POST /api/search/stream` | Same body. Streams newline-delimited JSON events: `metadata`, one `site` per direct lookup, then `done` with the full result (or `error`). |
+| `GET /api/suggest?q=one` | Up to 8 title suggestions for autocomplete. |
+
+Search routes share a limit of 10 requests per minute per IP; suggestions allow 60.
+
 ---
 
 ## 🔒 Privacy and Security
 
 - **Your data stays in your browser.** The watchlist, search history and theme are stored in `localStorage` under a single key (`mangafinder.v1`). Nothing is sent to the server, and clearing site data removes it.
 - **API keys stay on the server.** They are read from `.env` and never sent to the browser.
-- **Abuse protection.** Searches are rate limited per IP (10 per minute), and the server refuses to fetch private or internal network addresses.
+- **Abuse protection.** Requests are rate limited per IP, and the server refuses to fetch private or internal network addresses.
 
 ---
 
@@ -90,7 +110,7 @@ ComicFinder/
 ├── backend/
 │   ├── server.js                 # Express entry point; serves public/ and the API
 │   ├── routes/
-│   │   └── api.js                # POST /api/search (validation + rate limit)
+│   │   └── api.js                # Search, streaming search and suggest endpoints
 │   └── services/
 │       ├── geminiService.js      # Search pipeline: Gemini, site lookups, ranking, cache
 │       ├── mangadexService.js    # Series matching and metadata from MangaDex
@@ -103,7 +123,10 @@ ComicFinder/
 │   ├── script.js                 # UI: search, results, watchlist
 │   ├── store.mjs                 # Browser storage (watchlist, history, theme, cache)
 │   └── style.css
+├── scripts/
+│   └── check-sites.js            # Aggregator site health check
 ├── test/                         # node:test suites
+├── .github/workflows/            # CI and the weekly site check
 ├── .env.example
 └── package.json
 ```
@@ -126,7 +149,8 @@ ComicFinder/
 ## 🗺️ Roadmap
 
 - [ ] Lighter watchlist updates using MangaDex chapter feeds instead of full searches
-- [ ] Export and import the watchlist as a file
+- [ ] Search by image (manga page, cover or panel)
+- [ ] Installable app (PWA) with offline watchlist
 - [ ] Configurable Gemini model
 
 ---
