@@ -17,6 +17,7 @@ MangaFinder Pro takes a title, works out which series you mean, and returns a sh
 | **Smart search** | Google Gemini with grounded web search finds reading sites for the title, and known aggregator sites are queried directly in parallel. |
 | **Instant results** | Results stream in as they are found: the series appears in about half a second and the first reading links within a couple of seconds, while official sources are still being checked. |
 | **Autocomplete** | Title suggestions with covers appear as you type, so you can pick the exact series before searching. |
+| **Search by image** | Upload, paste or drop a manga page, panel, cover or a photo of a volume. The series is identified (SauceNAO for scanned pages, Gemini vision for everything else) and searched for you. On phones the image button opens the camera or gallery. |
 | **Verified links** | Each link is fetched and checked: dead pages, homepages, search pages, non-English pages and pages about a different series are dropped. |
 | **Official first** | Results are split into *Official* and *Other sources*, with licensed publishers ranked at the top. An *Official only* switch hides everything unofficial. |
 | **Right series** | Titles are matched on MangaDex across English, romanized and alternate names, skipping fan works. A "Not this one?" row lets you switch to a related series. |
@@ -68,6 +69,7 @@ GitHub Actions runs the tests, a frontend syntax check and a server smoke test o
 | `GEMINI_API_KEY` | ✅ | Google Gemini API key from [AI Studio](https://aistudio.google.com/app/apikey). |
 | `FIRECRAWL_API_KEY` | Optional | Lets the app read sites protected by Cloudflare challenges, both for direct lookups and for checking links. Uses about 1–3 credits per new search. Without it, those sites are skipped or left unchecked. |
 | `GEMINI_MODEL` | Optional | Gemini model used for search and image identification. Defaults to `gemini-2.5-flash`. Must support Google Search grounding; newer models (e.g. `gemini-3.5-flash`) may need billing enabled on your key. The model in use is printed when the server starts. |
+| `SAUCENAO_API_KEY` | Optional | [SauceNAO](https://saucenao.com) key (free account, about 150 searches a day). Makes image search exact for scanned manga pages and often finds the chapter. Without it, Gemini vision identifies images on its own. |
 | `PORT` | Optional | Server port. Defaults to `3000`. |
 
 ### Other AI providers
@@ -103,8 +105,9 @@ Steps 1 and 3 are streamed to the browser as they finish (`POST /api/search/stre
 | `POST /api/search` | Body `{ "query": "One Piece", "forceRefresh": false }`. Returns the full ranked result. |
 | `POST /api/search/stream` | Same body. Streams newline-delimited JSON events: `metadata`, one `site` per direct lookup, then `done` with the full result (or `error`). |
 | `GET /api/suggest?q=one` | Up to 8 title suggestions for autocomplete. |
+| `POST /api/image-search` | Body `{ "image": "data:image/jpeg;base64,..." }` (JPEG, PNG or WebP, up to 4 MB). Returns `{ "match": { "source", "title", "chapter", "confidence", "reason" } }`, or `{ "match": null }` if the image can't be identified. |
 
-Search routes share a limit of 10 requests per minute per IP; suggestions allow 60.
+Search routes share a limit of 10 requests per minute per IP; suggestions allow 60 and image searches 6.
 
 ---
 
@@ -142,6 +145,7 @@ A plain JSON array of bookmark objects (without the wrapper) is accepted too.
 
 - **Your data stays in your browser.** The watchlist, search history and theme are stored in `localStorage` under a single key (`mangafinder.v1`). Nothing is sent to the server, and clearing site data removes it.
 - **API keys stay on the server.** They are read from `.env` and never sent to the browser.
+- **Images are not stored.** Images for image search are shrunk and re-encoded in your browser (which also removes metadata such as photo location), then sent to Google Gemini (and SauceNAO, if configured) only to identify the series.
 - **Abuse protection.** Requests are rate limited per IP, and the server refuses to fetch private or internal network addresses.
 
 ---
@@ -159,6 +163,7 @@ ComicFinder/
 │       ├── mangadexService.js    # Series matching and metadata from MangaDex
 │       ├── siteFamilyService.js  # Direct lookups on aggregator sites
 │       ├── validationService.js  # Link checks, language check, SSRF guard
+│       ├── imageSearchService.js # Identify a series from an image (SauceNAO, Gemini vision)
 │       ├── firecrawlService.js   # Optional Firecrawl client
 │       └── cacheService.js       # 24h file cache for search results
 ├── public/
@@ -192,9 +197,7 @@ ComicFinder/
 ## 🗺️ Roadmap
 
 - [ ] Lighter watchlist updates using MangaDex chapter feeds instead of full searches
-- [ ] Search by image (manga page, cover or panel)
 - [ ] Installable app (PWA) with offline watchlist
-- [ ] Configurable Gemini model
 
 ---
 

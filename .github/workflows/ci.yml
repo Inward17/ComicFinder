@@ -42,3 +42,4 @@ jobs:
           EXPECT=400 check -X POST -H 'Content-Type: application/json' -d '{}' http://localhost:3999/api/search
           EXPECT=400 check -X POST -H 'Content-Type: application/json' -d '{}' http://localhost:3999/api/search/stream
           EXPECT=200 check 'http://localhost:3999/api/suggest?q=x'
+          EXPECT=400 check -X POST -H 'Content-Type: application/json' -d '{"image":"nope"}' http://localhost:3999/api/image-search
