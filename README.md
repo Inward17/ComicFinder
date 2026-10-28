@@ -67,7 +67,20 @@ GitHub Actions runs the tests, a frontend syntax check and a server smoke test o
 |---|---|---|
 | `GEMINI_API_KEY` | ✅ | Google Gemini API key from [AI Studio](https://aistudio.google.com/app/apikey). |
 | `FIRECRAWL_API_KEY` | Optional | Lets the app read sites protected by Cloudflare challenges, both for direct lookups and for checking links. Uses about 1–3 credits per new search. Without it, those sites are skipped or left unchecked. |
+| `GEMINI_MODEL` | Optional | Gemini model used for search and image identification. Defaults to `gemini-2.5-flash`. Must support Google Search grounding; newer models (e.g. `gemini-3.5-flash`) may need billing enabled on your key. The model in use is printed when the server starts. |
 | `PORT` | Optional | Server port. Defaults to `3000`. |
+
+### Other AI providers
+
+Only Google Gemini is supported today. The search needs a model that can **search the web**, **return JSON**, and (for image search) **read images**. Everything else (MangaDex matching, direct site lookups, link checking, ranking) does not depend on the AI provider, so adding one means replacing just the model call in `backend/services/geminiService.js` (`generateContent`).
+
+| Provider | Web search | Images | Effort to add | Notes |
+|---|---|---|---|---|
+| Google Gemini *(current)* | Google Search grounding | Yes | n/a | Free tier covers `gemini-2.5-flash` |
+| Anthropic Claude | Server-side web search tool | Yes | Medium | Messages API via `@anthropic-ai/sdk` (e.g. `claude-opus-5-5`); structured JSON output available |
+| OpenAI | Web search tool (Responses API) | Yes | Medium | Different request and citation format |
+| Perplexity Sonar | Built in (search-first models) | Limited | Easy–medium | Chat-style API that returns citations; image search would still need another model |
+| Local models (Ollama etc.) | None | Some | Hard | Needs a separate search step (for example Firecrawl search) whose results are passed to the model |
 
 ---
 

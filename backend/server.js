@@ -18,4 +18,5 @@ app.use('/api', apiRoutes);
 // Start server
 app.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
+  console.log(`   Gemini model: ${require('./services/geminiService').GEMINI_MODEL}`);
 });
