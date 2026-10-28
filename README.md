@@ -108,6 +108,36 @@ Search routes share a limit of 10 requests per minute per IP; suggestions allow 
 
 ---
 
+## 💾 Watchlist Backups
+
+**Export** downloads your watchlist as `mangafinder-watchlist-YYYY-MM-DD.json`. **Import** accepts that same file, so you can move your watchlist to another browser or device. Importing merges: series you already have are left as they are, and entries without an `id` and `title` are skipped.
+
+The file looks like this (`id` is the series' MangaDex ID):
+
+```json
+{
+  "app": "mangafinder",
+  "version": 1,
+  "exportedAt": "2026-10-29T10:00:00.000Z",
+  "bookmarks": [
+    {
+      "id": "a1c7c817-4e59-43b7-9365-09675a149a6f",
+      "title": "One Piece",
+      "coverUrl": "https://uploads.mangadex.org/covers/…",
+      "lastChapter": 1196,
+      "readingUrl": "https://mangaplus.shueisha.co.jp/titles/100020",
+      "readingSite": "MANGA Plus by Shueisha",
+      "hasNewChapter": false,
+      "addedAt": 1793128000000
+    }
+  ]
+}
+```
+
+A plain JSON array of bookmark objects (without the wrapper) is accepted too.
+
+---
+
 ## 🔒 Privacy and Security
 
 - **Your data stays in your browser.** The watchlist, search history and theme are stored in `localStorage` under a single key (`mangafinder.v1`). Nothing is sent to the server, and clearing site data removes it.

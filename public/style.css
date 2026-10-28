@@ -298,6 +298,8 @@ a { color: inherit; }
 .section-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin: 28px 0 18px; }
 .section-head h2 { font-family: 'Bebas Neue', sans-serif; font-weight: 400; font-size: 40px; letter-spacing: 1px; line-height: 1; }
 .head-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.import-hint { margin: -6px 0 18px; display: flex; gap: 6px; align-items: baseline; }
+.import-hint code { font-size: 12px; background: var(--surface-2); padding: 1px 5px; border-radius: 4px; overflow-wrap: anywhere; }
 
 .poster-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 18px; }
 .poster {
