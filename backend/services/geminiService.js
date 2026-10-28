@@ -38,7 +38,15 @@ async function generateContent(parts, { search = false } = {}) {
   }
 
   const data = await resp.json();
-  if (data.error) throw new Error(`Gemini (${GEMINI_MODEL}): ${data.error.message}`);
+  if (data.error) {
+    // Out of quota (the free tier allows only ~20 requests a day): say so plainly instead of Google's long text
+    if (data.error.code === 429 || data.error.status === 'RESOURCE_EXHAUSTED') {
+      const err = new Error(`The Gemini API limit for ${GEMINI_MODEL} is used up for now (the free tier allows about 20 requests a day). Try again later, or enable billing on your Gemini key.`);
+      err.code = 'GEMINI_QUOTA';
+      throw err;
+    }
+    throw new Error(`Gemini (${GEMINI_MODEL}): ${data.error.message}`);
+  }
 
   // Grounded responses can be split across several parts; a safety block returns no content at all.
   const candidate = data.candidates && data.candidates[0];
@@ -142,7 +150,7 @@ async function searchManga(query, forceRefresh = false, onProgress = () => {}) {
   ]);
 
   if (geminiOutcome.error) {
-    console.error("Gemini Search Error:", geminiOutcome.error);
+    console.error("Gemini Search Error:", geminiOutcome.error.message);
     // Direct site lookups still give the user something when Gemini fails
     if (siteResults.length === 0) {
       throw new Error(geminiOutcome.error.message || 'Failed to search Gemini');
@@ -173,8 +181,9 @@ async function searchManga(query, forceRefresh = false, onProgress = () => {}) {
     finalResults = [...passingResults, ...siteResults];
   }
 
-  // Phase 4: Save to cache
-  await cacheService.setCache(searchTitle, finalResults);
+  // Phase 4: Save to cache. Not when Gemini failed: the results lack official sources,
+  // and caching them would hide those for a day after Gemini recovers.
+  if (!geminiOutcome.error) await cacheService.setCache(searchTitle, finalResults);
 
   return {
     success: true,
@@ -183,7 +192,11 @@ async function searchManga(query, forceRefresh = false, onProgress = () => {}) {
     metadata: metadata,
     results: finalResults,
     failedCandidates: failingResults,
-    fromCache: false
+    fromCache: false,
+    // Shown above the results when only the direct site lookups could run
+    warning: geminiOutcome.error
+      ? (geminiOutcome.error.code === 'GEMINI_QUOTA' ? geminiOutcome.error.message : 'Official sources could not be searched right now, so only direct site results are shown.')
+      : null
   };
 }
 

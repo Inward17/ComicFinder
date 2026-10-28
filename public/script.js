@@ -205,7 +205,8 @@ async function doSearch(forceRefresh = false, { fromImage = false } = {}) {
       } else if (event.type === 'error') {
         throw new Error(event.data.message);
       } else if (event.type === 'done') {
-        store.cacheSearch(q, event.data);
+        // Partial results (official sources unavailable) aren't worth keeping for a day
+        if (!event.data.warning) store.cacheSearch(q, event.data);
         stopLoading();
         renderResults(event.data, q, event.data.fromCache);
         store.addHistory(q);
@@ -272,6 +273,9 @@ function renderResults(data, query, cached, pending = false) {
       <span><i class="ti ti-bolt" aria-hidden="true"></i> Saved results (last 24 h)</span>
       <button data-action="refresh"><i class="ti ti-refresh" aria-hidden="true"></i> Refresh</button>
     </div>`;
+  }
+  if (data.warning) {
+    html += `<div class="notice notice-warn"><span><i class="ti ti-alert-triangle" aria-hidden="true"></i> ${esc(data.warning)}</span></div>`;
   }
 
   currentSeries = null;
@@ -566,8 +570,9 @@ async function searchByImage(file) {
 
     const m = data.match;
     if (!m) {
+      const guess = data.guess ? ` Gemini guessed “${esc(data.guess)}”, but no series by that name exists.` : '';
       showImageNotice(dataUrl, `Couldn't identify this image.
-        <span class="muted">Try a clearer page, a cover, or type the title instead.</span>`);
+        <span class="muted">${guess} Try a clearer page, a cover, or type the title instead.</span>`);
       return;
     }
 

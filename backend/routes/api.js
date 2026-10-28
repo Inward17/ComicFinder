@@ -134,13 +134,13 @@ const imageLimit = createRateLimit(6, 'Too many image searches. Please wait a mi
 
 // POST /api/image-search
 // Body: { image: "data:image/jpeg;base64,..." } (up to 4 MB; the server.js body limit allows for base64 overhead)
-// Returns { match: { source, title, chapter, confidence, reason } | null }
+// Returns { match: { source, title, chapter, confidence, reason } | null, guess: string | null }
 router.post('/image-search', imageLimit, async (req, res) => {
   try {
-    const match = await imageSearchService.identifyImage((req.body || {}).image);
-    res.json({ match });
+    res.json(await imageSearchService.identifyImage((req.body || {}).image));
   } catch (error) {
     if (error.code === 'BAD_IMAGE') return res.status(400).json({ error: error.message });
+    if (error.code === 'GEMINI_QUOTA') return res.status(503).json({ error: error.message });
     console.error("Image Search Error:", error.message);
     res.status(500).json({ error: error.message || 'Image search failed' });
   }

@@ -66,10 +66,10 @@ GitHub Actions runs the tests, a frontend syntax check and a server smoke test o
 
 | Variable | Required | Description |
 |---|---|---|
-| `GEMINI_API_KEY` | ✅ | Google Gemini API key from [AI Studio](https://aistudio.google.com/app/apikey). |
+| `GEMINI_API_KEY` | ✅ | Google Gemini API key from [AI Studio](https://aistudio.google.com/app/apikey). The free tier allows only about 20 requests a day; each new (uncached) search, and each image Gemini identifies, uses one. When it runs out, searches still show the direct site results, and the app says the limit was reached. Enable billing on the key for more. |
 | `FIRECRAWL_API_KEY` | Optional | Lets the app read sites protected by Cloudflare challenges, both for direct lookups and for checking links. Uses about 1–3 credits per new search. Without it, those sites are skipped or left unchecked. |
 | `GEMINI_MODEL` | Optional | Gemini model used for search and image identification. Defaults to `gemini-2.5-flash`. Must support Google Search grounding; newer models (e.g. `gemini-3.5-flash`) may need billing enabled on your key. The model in use is printed when the server starts. |
-| `SAUCENAO_API_KEY` | Optional | [SauceNAO](https://saucenao.com) key (free account, about 150 searches a day). Makes image search exact for scanned manga pages and often finds the chapter. Without it, Gemini vision identifies images on its own. |
+| `SAUCENAO_API_KEY` | Optional | [SauceNAO](https://saucenao.com) key (free account: 100 searches a day, 4 per 30 seconds). Makes image search exact for scanned manga pages and often finds the chapter. Without it, Gemini vision identifies images on its own. |
 | `PORT` | Optional | Server port. Defaults to `3000`. |
 
 ### Other AI providers
@@ -78,7 +78,7 @@ Only Google Gemini is supported today. The search needs a model that can **searc
 
 | Provider | Web search | Images | Effort to add | Notes |
 |---|---|---|---|---|
-| Google Gemini *(current)* | Google Search grounding | Yes | n/a | Free tier covers `gemini-2.5-flash` |
+| Google Gemini *(current)* | Google Search grounding | Yes | n/a | Free tier covers `gemini-2.5-flash`, but only about 20 requests a day |
 | Anthropic Claude | Server-side web search tool | Yes | Medium | Messages API via `@anthropic-ai/sdk` (e.g. `claude-opus-5-5`); structured JSON output available |
 | OpenAI | Web search tool (Responses API) | Yes | Medium | Different request and citation format |
 | Perplexity Sonar | Built in (search-first models) | Limited | Easy–medium | Chat-style API that returns citations; image search would still need another model |
