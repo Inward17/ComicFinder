@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node backend/server.js",
     "dev": "node backend/server.js",
-    "test": "node --test"
+    "test": "node --test",
+    "check-sites": "node scripts/check-sites.js"
   },
   "repository": {
     "type": "git",

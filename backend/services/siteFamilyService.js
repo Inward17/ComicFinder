@@ -16,6 +16,7 @@ const firecrawlService = require('./firecrawlService');
 const SITE_FAMILIES = [
   {
     family: 'mangakakalot',
+    probeSlug: 'one-piece', // A series every site carries, for `npm run check-sites`
     seriesPath: '/manga/{slug}',
     searchPath: '/search/story/{query}',
     sites: [

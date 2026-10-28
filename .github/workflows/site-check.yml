@@ -1,0 +1,27 @@
+name: Site check
+
+# Aggregator sites change domains and layouts often; catch it before users do.
+# A failed scheduled run emails the repository owner.
+on:
+  schedule:
+    - cron: '0 6 * * 1' # Mondays, 06:00 UTC
+  workflow_dispatch:
+
+jobs:
+  check-sites:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Check aggregator sites
+        run: npm run check-sites
+        env:
+          # Optional repository secret; without it, Cloudflare-blocked sites are reported as warnings
+          FIRECRAWL_API_KEY: ${{ secrets.FIRECRAWL_API_KEY }}
