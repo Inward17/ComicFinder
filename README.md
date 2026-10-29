@@ -3,6 +3,7 @@
 > Find where to read any manga, manhwa, or manhua in English. Official sources first, every link checked.
 
 ![CI](https://github.com/Inward17/ComicFinder/actions/workflows/ci.yml/badge.svg)
+[![Release](https://img.shields.io/github/v/release/Inward17/ComicFinder)](https://github.com/Inward17/ComicFinder/releases)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![Node](https://img.shields.io/badge/node-%3E%3D20-brightgreen)
 
@@ -65,6 +66,7 @@ Open [http://localhost:3000](http://localhost:3000).
 | **CI** (`ci.yml`) | Every push and pull request | Tests on Node 20 and 22, frontend syntax check, server smoke test (pages, API validation, health check, CORS) |
 | **Deploy** (`deploy.yml`) | Every push to `main` | Runs the tests, then publishes the frontend to **GitHub Pages** only if they pass |
 | **Site check** (`site-check.yml`) | Mondays, or on demand | Checks every aggregator site still works; add `FIRECRAWL_API_KEY` as a repository secret to verify Cloudflare-protected ones |
+| **Release** (`release.yml`) | A version tag such as `v3.1.0` is pushed | Runs the tests, checks the tag matches `package.json`, and publishes a GitHub release with that version's `CHANGELOG.md` notes |
 
 GitHub Pages only serves static files, so the app is hosted in two parts:
 
@@ -73,7 +75,7 @@ GitHub Pages only serves static files, so the app is hosted in two parts:
 
 ### First-time setup
 
-1. **Backend:** on Render choose *New → Blueprint*, pick this repository, and enter `GEMINI_API_KEY` (plus `FIRECRAWL_API_KEY` / `SAUCENAO_API_KEY` if you use them) when asked. `ALLOWED_ORIGINS` and `TRUST_PROXY` are preset. Note the service URL, e.g. `https://mangafinder-api.onrender.com`. Opening `<url>/api/health` should show `{"ok":true}`.
+1. **Backend:** on Render choose *New → Blueprint*, pick this repository, and enter `GEMINI_API_KEY` (plus `FIRECRAWL_API_KEY` / `SAUCENAO_API_KEY` if you use them) when asked. `ALLOWED_ORIGINS` and `TRUST_PROXY` are preset. Note the service URL, e.g. `https://mangafinder-api.onrender.com`. Opening `<url>/api/health` should show `{"ok":true,"version":"…"}` with the version it is running.
 2. **Point the frontend at it:** in GitHub, *Settings → Secrets and variables → Actions → Variables*, add `API_BASE_URL` with that URL.
 3. **Pages:** *Settings → Pages → Source: GitHub Actions* (already enabled for this repository).
 4. Push to `main` (or run *Deploy* from the Actions tab). The site is live when the workflow finishes.
@@ -127,6 +129,7 @@ Steps 1 and 3 are streamed to the browser as they finish (`POST /api/search/stre
 | `POST /api/search` | Body `{ "query": "One Piece", "forceRefresh": false }`. Returns the full ranked result. |
 | `POST /api/search/stream` | Same body. Streams newline-delimited JSON events: `metadata`, one `site` per direct lookup, then `done` with the full result (or `error`). |
 | `GET /api/suggest?q=one` | Up to 8 title suggestions for autocomplete. |
+| `GET /api/health` | `{ "ok": true, "version": "3.1.0" }`. For uptime checks; not rate limited. |
 | `POST /api/image-search` | Body `{ "image": "data:image/jpeg;base64,..." }` (JPEG, PNG or WebP, up to 4 MB). Returns `{ "match": { "source", "title", "chapter", "confidence", "reason" } }`, or `{ "match": null }` if the image can't be identified. |
 | `POST /api/import/anilist` | Body `{ "username": "name", "includeCompleted": false }`. Streams `progress` events, then `done` with `{ bookmarks, notFound, truncated }` (or `error`). |
 | `POST /api/export/mal-ids` | Body `{ "ids": ["<MangaDex ID>", ...] }` (up to 500). Returns `{ "malIds": { "<MangaDex ID>": 2 } }` for series MangaDex links to MyAnimeList; used for the AniList export. |
@@ -198,7 +201,7 @@ ComicFinder/
 ├── backend/
 │   ├── server.js                 # Express entry point; serves public/ and the API
 │   ├── routes/
-│   │   └── api.js                # Search, streaming search and suggest endpoints
+│   │   └── api.js                # Search, suggest, image search, import/export endpoints
 │   └── services/
 │       ├── geminiService.js      # Search pipeline: Gemini, site lookups, ranking, cache
 │       ├── mangadexService.js    # Series matching and metadata from MangaDex
@@ -217,10 +220,11 @@ ComicFinder/
 ├── scripts/
 │   └── check-sites.js            # Aggregator site health check
 ├── test/                         # node:test suites
-├── .github/workflows/            # CI, Pages deploy (CD) and the weekly site check
+├── .github/workflows/            # CI, Pages deploy (CD), weekly site check, releases
 ├── render.yaml                   # Render blueprint for the backend
+├── CHANGELOG.md                  # What changed in each version
 ├── .env.example
-└── package.json
+└── package.json                  # Holds the current version
 ```
 
 ---
@@ -235,6 +239,29 @@ ComicFinder/
 | **Metadata** | MangaDex API v5 |
 | **Scraping** | Firecrawl (optional) |
 | **Icons / fonts** | Tabler Icons, Bebas Neue, DM Sans |
+
+---
+
+## 🏷️ Versions and Releases
+
+MangaFinder uses [Semantic Versioning](https://semver.org/). The current version is in `package.json`, every change is listed in [CHANGELOG.md](CHANGELOG.md), and each version has a [GitHub release](https://github.com/Inward17/ComicFinder/releases). A running server reports its version at `/api/health`.
+
+- **Major** (`4.0.0`): something that used to work changes or goes away, such as an API route, an `.env` setting or the watchlist file format. Read the release notes before updating.
+- **Minor** (`3.2.0`): new features; nothing existing breaks.
+- **Patch** (`3.1.1`): bug fixes only.
+
+To get notified, use *Watch → Custom → Releases* on the GitHub repository.
+
+### Making a release
+
+1. While working, add each change under `## [Unreleased]` in `CHANGELOG.md` (Added / Changed / Fixed / Removed / Security).
+2. When ready, rename that section to `## [X.Y.Z] - YYYY-MM-DD`, add a fresh empty `## [Unreleased]` above it, and update the compare links at the bottom.
+3. Set the version without creating a tag yet: `npm version X.Y.Z --no-git-tag-version` (updates `package.json` and `package-lock.json`).
+4. Merge to `main`, then tag the merge commit and push the tag:
+   ```bash
+   git tag vX.Y.Z && git push origin vX.Y.Z
+   ```
+   The **Release** workflow checks the tag matches `package.json` and publishes the GitHub release with that version's notes.
 
 ---
 
