@@ -192,7 +192,7 @@ export const store = {
    */
   importBookmarks(backup) {
     const list = Array.isArray(backup) ? backup : backup && Array.isArray(backup.bookmarks) ? backup.bookmarks : null;
-    if (!list) throw new Error('Not a MangaFinder watchlist file');
+    if (!list) throw new Error('Not a MangaFinder watchlist file. Choose a .json file made with Export.');
 
     const db = read();
     let added = 0;

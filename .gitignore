@@ -3,7 +3,7 @@ node_modules/
 
 # Environment & Secrets
 .env
-config.js
+/config.js
 
 # Cache
 .cache.json

@@ -5,6 +5,9 @@
 
 import { store } from './store.mjs';
 
+// Server address from config.js; empty = same origin
+const API = (window.MANGAFINDER_API || '').replace(/\/$/, '');
+
 const $ = id => document.getElementById(id);
 const inp = $('inp');
 const themeBtn = $('themeBtn');
@@ -18,11 +21,15 @@ const bookmarksGrid = $('bookmarksGrid');
 const bookmarkCount = $('bookmarkCount');
 const checkAllBtn = $('checkAllBtn');
 const suggestEl = $('suggestions');
+const imageBtn = $('imageBtn');
+const imageFile = $('imageFile');
+const imageNotice = $('imageNotice');
 
 const SUGGESTIONS = ['Solo Leveling', 'One Piece', 'Omniscient Reader', 'Frieren'];
 const SLOW_SEARCH_SECONDS = 20;
 const SUGGEST_MIN_LENGTH = 2;
 const SUGGEST_DELAY_MS = 200;
+const IMAGE_MAX_SIDE = 1280; // Downscaled in the browser before upload; plenty for recognition
 
 // Series shown in the current results, used when bookmarking it
 let currentSeries = null;
@@ -58,6 +65,14 @@ function hostOf(url) {
   } catch {
     return '';
   }
+}
+
+// A failed fetch (server down, asleep or unreachable) throws a bare TypeError; say what it means
+function errorMessage(err) {
+  if (err instanceof TypeError) {
+    return "Can't reach the MangaFinder server. If it was idle it may be starting up, so try again in a minute.";
+  }
+  return err.message || "Something went wrong. Check the console for details.";
 }
 
 function toast(message) {
@@ -155,8 +170,13 @@ function cancelSearch() {
   stopLoading();
 }
 
-async function doSearch(forceRefresh = false) {
+/**
+ * @param {boolean} [forceRefresh] Skip both caches
+ * @param {{fromImage?: boolean}} [options] fromImage: keep the "identified from your image" notice
+ */
+async function doSearch(forceRefresh = false, { fromImage = false } = {}) {
   closeSuggestions();
+  if (!fromImage) imageNotice.innerHTML = '';
   const q = inp.value.trim();
   if (!q) return;
   cancelSearch();
@@ -175,7 +195,7 @@ async function doSearch(forceRefresh = false) {
 
   startLoading();
   try {
-    const resp = await fetch('/api/search/stream', {
+    const resp = await fetch(`${API}/api/search/stream`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ query: q, forceRefresh }),
@@ -196,7 +216,8 @@ async function doSearch(forceRefresh = false) {
       } else if (event.type === 'error') {
         throw new Error(event.data.message);
       } else if (event.type === 'done') {
-        store.cacheSearch(q, event.data);
+        // Partial results (official sources unavailable) aren't worth keeping for a day
+        if (!event.data.warning) store.cacheSearch(q, event.data);
         stopLoading();
         renderResults(event.data, q, event.data.fromCache);
         store.addHistory(q);
@@ -209,7 +230,7 @@ async function doSearch(forceRefresh = false) {
     if (controller.signal.aborted) return; // superseded by a newer search
     console.error(err);
     stopLoading();
-    resultsEl.innerHTML = `<div class="empty"><i class="ti ti-alert-circle" aria-hidden="true"></i>${esc(err.message || 'Something went wrong. Check the console for details.')}</div>`;
+    resultsEl.innerHTML = `<div class="empty"><i class="ti ti-alert-circle" aria-hidden="true"></i>${esc(errorMessage(err))}</div>`;
   } finally {
     if (searchController === controller) searchController = null; // finished, nothing left to cancel
   }
@@ -263,6 +284,9 @@ function renderResults(data, query, cached, pending = false) {
       <span><i class="ti ti-bolt" aria-hidden="true"></i> Saved results (last 24 h)</span>
       <button data-action="refresh"><i class="ti ti-refresh" aria-hidden="true"></i> Refresh</button>
     </div>`;
+  }
+  if (data.warning) {
+    html += `<div class="notice notice-warn"><span><i class="ti ti-alert-triangle" aria-hidden="true"></i> ${esc(data.warning)}</span></div>`;
   }
 
   currentSeries = null;
@@ -451,7 +475,7 @@ async function loadSuggestions(q) {
   if (suggestController) suggestController.abort();
   const controller = suggestController = new AbortController();
   try {
-    const resp = await fetch(`/api/suggest?q=${encodeURIComponent(q)}`, { signal: controller.signal });
+    const resp = await fetch(`${API}/api/suggest?q=${encodeURIComponent(q)}`, { signal: controller.signal });
     if (!resp.ok) return;
     const data = await resp.json();
     // Ignore answers for text the user has since changed, or after they left the box
@@ -504,6 +528,109 @@ suggestEl.addEventListener('mousedown', e => {
   chooseSuggestion(Number(item.dataset.index));
 });
 inp.addEventListener('blur', closeSuggestions);
+
+// ============================================================
+// IMAGE SEARCH
+// ============================================================
+
+// Re-encodes as a downscaled JPEG: smaller upload, and strips metadata such as photo location
+async function imageToDataUrl(file) {
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(1, IMAGE_MAX_SIDE / Math.max(bitmap.width, bitmap.height));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(bitmap.width * scale);
+  canvas.height = Math.round(bitmap.height * scale);
+  canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  bitmap.close();
+  return canvas.toDataURL('image/jpeg', 0.85);
+}
+
+function showImageNotice(dataUrl, html) {
+  imageNotice.innerHTML = `<div class="notice image-notice"><img src="${esc(dataUrl)}" alt="Your image"><span>${html}</span></div>`;
+}
+
+async function searchByImage(file) {
+  if (!file || !/^image\/(jpeg|png|webp)$/.test(file.type)) {
+    toast('Choose a JPEG, PNG or WebP image.');
+    return;
+  }
+  closeSuggestions();
+  switchView('search');
+  if (searchController) searchController.abort();
+
+  let dataUrl;
+  try {
+    dataUrl = await imageToDataUrl(file);
+  } catch {
+    toast("Couldn't read that image.");
+    return;
+  }
+
+  showImageNotice(dataUrl, `<span class="spinner"></span>Identifying your image…
+    <span class="muted">Sent to Google Gemini (and SauceNAO, if set up) to identify it. Not stored.</span>`);
+  imageBtn.disabled = true;
+
+  try {
+    const resp = await fetch(`${API}/api/image-search`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image: dataUrl })
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.error || `Image search failed (HTTP ${resp.status})`);
+
+    const m = data.match;
+    if (!m) {
+      const guess = data.guess ? ` Gemini guessed “${esc(data.guess)}”, but no series by that name exists.` : '';
+      showImageNotice(dataUrl, `Couldn't identify this image.
+        <span class="muted">${guess} Try a clearer page, a cover, or type the title instead.</span>`);
+      return;
+    }
+
+    const via = m.source === 'saucenao' ? 'SauceNAO' : 'Gemini';
+    const details = [m.chapter ? `chapter ${m.chapter}` : '', `via ${via}`, m.confidence].filter(Boolean).join(' · ');
+    showImageNotice(dataUrl, `Looks like <strong>${esc(m.title)}</strong> <span class="muted">${esc(details)}${m.reason ? ` — ${esc(m.reason)}` : ''}</span>`);
+    inp.value = m.title;
+    doSearch(false, { fromImage: true });
+  } catch (err) {
+    showImageNotice(dataUrl, esc(errorMessage(err)));
+  } finally {
+    imageBtn.disabled = false;
+  }
+}
+
+imageBtn.addEventListener('click', () => imageFile.click());
+imageFile.addEventListener('change', () => {
+  const file = imageFile.files[0];
+  imageFile.value = ''; // allow choosing the same image again
+  if (file) searchByImage(file);
+});
+
+// Paste an image anywhere (including into the search box)
+document.addEventListener('paste', e => {
+  const file = [...((e.clipboardData && e.clipboardData.files) || [])].find(f => f.type.startsWith('image/'));
+  if (!file) return;
+  e.preventDefault();
+  searchByImage(file);
+});
+
+// Drop an image anywhere on the page
+const hero = document.querySelector('.hero');
+document.addEventListener('dragover', e => {
+  if (!e.dataTransfer || ![...e.dataTransfer.types].includes('Files')) return;
+  e.preventDefault();
+  hero.classList.add('dragging');
+});
+document.addEventListener('dragleave', e => {
+  if (!e.relatedTarget) hero.classList.remove('dragging'); // left the window
+});
+document.addEventListener('drop', e => {
+  hero.classList.remove('dragging');
+  const file = [...((e.dataTransfer && e.dataTransfer.files) || [])][0];
+  if (!file) return;
+  e.preventDefault();
+  searchByImage(file);
+});
 
 // ============================================================
 // HISTORY
@@ -626,6 +753,78 @@ async function importWatchlist(file) {
   }
 }
 
+const anilistDialog = $('anilistDialog');
+let anilistController = null;
+
+function openAniListImport() {
+  $('anilistStatus').innerHTML = '';
+  $('anilistClose').textContent = 'Cancel';
+  anilistDialog.showModal();
+  $('anilistUser').focus();
+}
+
+function closeAniListImport() {
+  if (anilistController) anilistController.abort();
+  anilistController = null;
+  anilistDialog.close();
+}
+
+async function importFromAniList() {
+  const statusBox = $('anilistStatus');
+  const submit = $('anilistSubmit');
+  const controller = anilistController = new AbortController();
+  submit.disabled = true;
+  statusBox.textContent = 'Reading your AniList list…';
+
+  try {
+    const resp = await fetch(`${API}/api/import/anilist`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: $('anilistUser').value.trim(), includeCompleted: $('anilistCompleted').checked }),
+      signal: controller.signal
+    });
+    if (!resp.ok) throw new Error((await resp.json().catch(() => ({}))).error || `Import failed (HTTP ${resp.status})`);
+
+    for await (const event of readEvents(resp)) {
+      if (event.type === 'progress') {
+        statusBox.textContent = `Matching ${event.data.done} of ${event.data.total} on MangaDex…`;
+      } else if (event.type === 'error') {
+        throw new Error(event.data.message);
+      } else if (event.type === 'done') {
+        const { bookmarks, notFound, truncated } = event.data;
+        const { added, skipped } = store.importBookmarks(bookmarks);
+        updateBookmarkBadge();
+        renderBookmarks();
+        let html = `Added ${added} series${skipped ? `, ${skipped} already in your watchlist` : ''}.`;
+        if (truncated) html += ' Only the first 300 series were imported.';
+        if (notFound.length) {
+          html += `<details><summary>${notFound.length} not found on MangaDex</summary>
+            <ul>${notFound.map(t => `<li>${esc(t)}</li>`).join('')}</ul></details>`;
+        }
+        statusBox.innerHTML = html;
+        $('anilistClose').textContent = 'Close';
+        return;
+      }
+    }
+    throw new Error('The import ended early. Please try again.');
+  } catch (err) {
+    if (controller.signal.aborted) return;
+    statusBox.textContent = errorMessage(err);
+  } finally {
+    submit.disabled = false;
+    if (anilistController === controller) anilistController = null;
+  }
+}
+
+$('anilistForm').addEventListener('submit', e => {
+  e.preventDefault();
+  importFromAniList();
+});
+// Esc closes the dialog; stop an import that is still running
+anilistDialog.addEventListener('cancel', () => {
+  if (anilistController) anilistController.abort();
+});
+
 async function checkAllUpdates() {
   const bookmarks = store.listBookmarks();
   if (!bookmarks.length) return;
@@ -640,7 +839,7 @@ async function checkAllUpdates() {
     checkAllBtn.innerHTML = `<div class="spinner"></div> Checking ${i + 1} of ${bookmarks.length}…`;
 
     try {
-      const resp = await fetch('/api/search', {
+      const resp = await fetch(`${API}/api/search`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ query: b.title })
@@ -721,6 +920,8 @@ document.addEventListener('click', e => {
   else if (action === 'go-search') { switchView('search'); inp.focus(); }
   else if (action === 'export-watchlist') exportWatchlist();
   else if (action === 'import-watchlist') $('importFile').click();
+  else if (action === 'open-anilist') openAniListImport();
+  else if (action === 'close-anilist') closeAniListImport();
 });
 
 resultsEl.addEventListener('change', e => {

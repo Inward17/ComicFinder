@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const geminiService = require('../services/geminiService');
 const mangadexService = require('../services/mangadexService');
+const imageSearchService = require('../services/imageSearchService');
+const anilistService = require('../services/anilistService');
 
 const MAX_QUERY_LENGTH = 200;
 const RATE_WINDOW_MS = 60 * 1000;
@@ -9,7 +11,7 @@ const RATE_WINDOW_MS = 60 * 1000;
 /**
  * Per-IP fixed-window rate limiter.
  * ponytail: in-memory, per-process; move to a shared store if running multiple instances.
- * Behind a reverse proxy, set app.set('trust proxy', ...) so req.ip is the client, not the proxy.
+ * Behind a reverse proxy, set TRUST_PROXY (see server.js) so req.ip is the visitor, not the proxy.
  * @param {number} maxRequests Allowed requests per IP per minute
  * @param {string} message Error shown when the limit is hit
  */
@@ -125,6 +127,55 @@ router.get('/suggest', suggestLimit, async (req, res) => {
     console.error("Suggest Route Error:", error.message);
     res.status(502).json({ error: 'Suggestions are unavailable right now' });
   }
+});
+
+// Each image search is a vision call (and possibly a SauceNAO lookup, 4 per 30s on the free tier)
+const imageLimit = createRateLimit(6, 'Too many image searches. Please wait a minute and try again.');
+
+// POST /api/image-search
+// Body: { image: "data:image/jpeg;base64,..." } (up to 4 MB; the server.js body limit allows for base64 overhead)
+// Returns { match: { source, title, chapter, confidence, reason } | null, guess: string | null }
+router.post('/image-search', imageLimit, async (req, res) => {
+  try {
+    res.json(await imageSearchService.identifyImage((req.body || {}).image));
+  } catch (error) {
+    if (error.code === 'BAD_IMAGE') return res.status(400).json({ error: error.message });
+    if (error.code === 'GEMINI_QUOTA') return res.status(503).json({ error: error.message });
+    console.error("Image Search Error:", error.message);
+    res.status(500).json({ error: error.message || 'Image search failed' });
+  }
+});
+
+// Each import makes up to ~2 MangaDex requests per series
+const importLimit = createRateLimit(3, 'Too many imports. Please wait a minute and try again.');
+
+// POST /api/import/anilist
+// Body: { username: "name", includeCompleted?: boolean }
+// Streams newline-delimited JSON like /api/search/stream:
+//   {"type":"progress","data":{done, total}}
+//   {"type":"done","data":{bookmarks, notFound, truncated}}
+//   {"type":"error","data":{"message":"..."}}
+router.post('/import/anilist', importLimit, async (req, res) => {
+  const { username, includeCompleted } = req.body || {};
+
+  res.status(200).set({
+    'Content-Type': 'application/x-ndjson; charset=utf-8',
+    'Cache-Control': 'no-cache',
+    'X-Accel-Buffering': 'no'
+  });
+  res.flushHeaders();
+  const send = (type, data) => {
+    if (!res.writableEnded && !res.destroyed) res.write(JSON.stringify({ type, data }) + '\n');
+  };
+
+  try {
+    const result = await anilistService.importList(username, { includeCompleted: !!includeCompleted }, p => send('progress', p));
+    send('done', result);
+  } catch (error) {
+    if (error.code !== 'IMPORT_USER') console.error("AniList Import Error:", error.message);
+    send('error', { message: error.message || 'Import failed' });
+  }
+  res.end();
 });
 
 module.exports = router;
