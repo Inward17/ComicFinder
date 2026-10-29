@@ -46,6 +46,7 @@ jobs:
           EXPECT=200 check -X POST -H 'Content-Type: application/json' -d '{"username":"x"}' http://localhost:3999/api/import/anilist
           EXPECT=400 check -X POST -H 'Content-Type: application/json' -d '{"ids":["nope"]}' http://localhost:3999/api/export/mal-ids
           EXPECT=200 check http://localhost:3999/api/health
+          curl -s http://localhost:3999/api/health | grep -q "\"version\":\"$(node -p "require('./package.json').version")\""
           # CORS: the allowed origin gets the header, any other origin does not
           curl -s -o /dev/null -D - -X OPTIONS -H 'Origin: https://example.github.io' http://localhost:3999/api/search | grep -qi '^access-control-allow-origin: https://example.github.io'
           ! curl -s -o /dev/null -D - -X OPTIONS -H 'Origin: https://evil.example' http://localhost:3999/api/search | grep -qi '^access-control-allow-origin'

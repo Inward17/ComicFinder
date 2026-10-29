@@ -30,7 +30,8 @@ app.use('/api', (req, res, next) => {
 });
 
 // For the host's health checks (not rate limited)
-app.get('/api/health', (req, res) => res.json({ ok: true }));
+const { version } = require('../package.json');
+app.get('/api/health', (req, res) => res.json({ ok: true, version }));
 
 // Middleware
 // Image search carries a base64 image (4 MB max, ~5.4 MB encoded); every other route keeps the 100 KB default.
@@ -46,6 +47,6 @@ app.use('/api', apiRoutes);
 
 // Start server
 app.listen(PORT, () => {
-  console.log(`🚀 Server running on http://localhost:${PORT}`);
+  console.log(`🚀 MangaFinder v${version} running on http://localhost:${PORT}`);
   console.log(`   Gemini model: ${require('./services/geminiService').GEMINI_MODEL}`);
 });
