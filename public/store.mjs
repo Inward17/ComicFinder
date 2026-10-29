@@ -60,6 +60,34 @@ export function bookmarkProblem(b) {
   return null;
 }
 
+const xmlEscape = s => String(s).replace(/[<>&'"]/g, c => `&#${c.charCodeAt(0)};`);
+
+/**
+ * Bookmarks as a MyAnimeList manga list export, the format AniList's importer reads.
+ * Series with no MyAnimeList ID are left out. Progress isn't tracked here, so chapters read is 0.
+ * @param {Bookmark[]} bookmarks
+ * @param {Record<string, number>} malIds MangaDex ID -> MyAnimeList ID
+ */
+export function toMalXml(bookmarks, malIds) {
+  const entries = bookmarks.filter(b => malIds[b.id]).map(b => `  <manga>
+    <manga_mangadb_id>${Number(malIds[b.id])}</manga_mangadb_id>
+    <manga_title>${xmlEscape(b.title)}</manga_title>
+    <my_read_volumes>0</my_read_volumes>
+    <my_read_chapters>0</my_read_chapters>
+    <my_status>Reading</my_status>
+    <update_on_import>1</update_on_import>
+  </manga>`);
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<myanimelist>
+  <myinfo>
+    <user_export_type>2</user_export_type>
+    <user_total_manga>${entries.length}</user_total_manga>
+  </myinfo>
+${entries.join('\n')}
+</myanimelist>
+`;
+}
+
 function cleanBookmarks(raw) {
   const out = {};
   for (const b of Object.values(raw && typeof raw === 'object' ? raw : {})) {

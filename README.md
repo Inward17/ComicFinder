@@ -17,12 +17,12 @@ MangaFinder Pro takes a title, works out which series you mean, and returns a sh
 | **Smart search** | Google Gemini with grounded web search finds reading sites for the title, and known aggregator sites are queried directly in parallel. |
 | **Instant results** | Results stream in as they are found: the series appears in about half a second and the first reading links within a couple of seconds, while official sources are still being checked. |
 | **Autocomplete** | Title suggestions with covers appear as you type, so you can pick the exact series before searching. |
-| **Search by image** | Upload, paste or drop a manga page, panel, cover or a photo of a volume. The series is identified (SauceNAO for scanned pages, Gemini vision for everything else) and searched for you. On phones the image button opens the camera or gallery. |
+| **Search by image** | Upload, paste or drop a manga page, panel, cover or a photo of a volume. The series is identified (SauceNAO for scanned pages, Gemini vision for everything else) and searched once you confirm. On phones the image button opens the camera or gallery. |
 | **Verified links** | Each link is fetched and checked: dead pages, homepages, search pages, non-English pages and pages about a different series are dropped. |
 | **Official first** | Results are split into *Official* and *Other sources*, with licensed publishers ranked at the top. An *Official only* switch hides everything unofficial. |
 | **Right series** | Titles are matched on MangaDex across English, romanized and alternate names, skipping fan works. A "Not this one?" row lets you switch to a related series. |
 | **Series details** | Cover, author, year, status, genres, synopsis and the latest chapter. |
-| **Watchlist** | Save series in your browser and check them all for new chapters in one click. Import your list from AniList, or export it to a file and import it in another browser. No account needed. |
+| **Watchlist** | Save series in your browser and check them all for new chapters in one click. Import your list from AniList, export it back to AniList, or move it to another browser with a backup file. No account needed. |
 | **Fast repeats** | Results are cached for 24 hours on the server and in the browser. |
 | **Works on phones** | Responsive layout with a bottom tab bar, large tap targets and dark mode. |
 
@@ -129,8 +129,9 @@ Steps 1 and 3 are streamed to the browser as they finish (`POST /api/search/stre
 | `GET /api/suggest?q=one` | Up to 8 title suggestions for autocomplete. |
 | `POST /api/image-search` | Body `{ "image": "data:image/jpeg;base64,..." }` (JPEG, PNG or WebP, up to 4 MB). Returns `{ "match": { "source", "title", "chapter", "confidence", "reason" } }`, or `{ "match": null }` if the image can't be identified. |
 | `POST /api/import/anilist` | Body `{ "username": "name", "includeCompleted": false }`. Streams `progress` events, then `done` with `{ bookmarks, notFound, truncated }` (or `error`). |
+| `POST /api/export/mal-ids` | Body `{ "ids": ["<MangaDex ID>", ...] }` (up to 500). Returns `{ "malIds": { "<MangaDex ID>": 2 } }` for series MangaDex links to MyAnimeList; used for the AniList export. |
 
-Search routes share a limit of 10 requests per minute per IP; suggestions allow 60, image searches 6 and imports 3.
+Search routes share a limit of 10 requests per minute per IP; suggestions allow 60, image searches 6, and imports plus AniList exports 3.
 
 ---
 
@@ -138,8 +139,8 @@ Search routes share a limit of 10 requests per minute per IP; suggestions allow 
 
 | Source | How | Status |
 |---|---|---|
-| **MangaFinder** (another browser or device) | *Export* there, then *Import* the `.json` file here | ✅ |
-| **AniList** | *From AniList*, then enter your username. Your manga list must be public; no login or key needed. | ✅ |
+| **MangaFinder** (another browser or device) | *Export* → *Download backup* there, then *Import* → *Choose file* here | ✅ |
+| **AniList** | *Import*, then enter your username under AniList. Your manga list must be public; no login or key needed. | ✅ |
 | **MyAnimeList** | Import the list export file, or read a list by username | 🗺️ Planned |
 | **MangaDex** | Import a public MangaDex list | 🗺️ Planned |
 
@@ -149,9 +150,11 @@ Every import merges into your watchlist: series you already have are left as the
 
 Reading, re-reading, paused and planned series are imported (completed ones too, if you tick the box); novels and dropped series are skipped. Each series is matched to MangaDex using the AniList and MyAnimeList IDs that MangaDex stores, so a match is always the right series. Series that MangaDex doesn't carry are listed after the import instead of being guessed. Your AniList reading progress becomes the series' chapter, so *Check for new chapters* flags chapters you haven't read. Up to 300 series per import.
 
+**Export → Download for AniList** saves `mangafinder-anilist-YYYY-MM-DD.xml` in MyAnimeList list format, which [AniList imports](https://anilist.co/settings/import) as a manga list. Series are added as Reading with no chapters read, and AniList asks whether to overwrite series already on your list. AniList matches by MyAnimeList ID, so series MangaDex has no MyAnimeList link for are left out and listed.
+
 ### Backup files
 
-**Export** downloads your watchlist as `mangafinder-watchlist-YYYY-MM-DD.json`. **Import** accepts that same file, so you can move your watchlist to another browser or device. Entries without an `id` and `title` are skipped.
+**Export → Download backup** saves your watchlist as `mangafinder-watchlist-YYYY-MM-DD.json`. **Import** accepts that same file, so you can move your watchlist to another browser or device. Entries without an `id` and `title` are skipped.
 
 The file looks like this (`id` is the series' MangaDex ID):
 

@@ -178,4 +178,17 @@ router.post('/import/anilist', importLimit, async (req, res) => {
   res.end();
 });
 
+// POST /api/export/mal-ids
+// Body: { ids: ["mangadex-uuid", ...] }  ->  { malIds: { "mangadex-uuid": 2, ... } }
+// Used to build the MyAnimeList-format XML that AniList's importer reads.
+router.post('/export/mal-ids', importLimit, async (req, res) => {
+  try {
+    res.json({ malIds: await mangadexService.malIds((req.body || {}).ids) });
+  } catch (error) {
+    if (error.code === 'BAD_IDS') return res.status(400).json({ error: error.message });
+    console.error("MAL ID lookup error:", error.message);
+    res.status(502).json({ error: "Couldn't reach MangaDex. Please try again." });
+  }
+});
+
 module.exports = router;
