@@ -75,6 +75,29 @@ function errorMessage(err) {
   return err.message || "Something went wrong. Check the console for details.";
 }
 
+const NO_SERVER_MESSAGE = "This site isn't connected to a MangaFinder search server yet, so searches can't run right now.";
+
+// Our server answers API errors in JSON. Anything else (like a static host's 404/405 page)
+// means no MangaFinder server is behind this address.
+async function apiError(resp) {
+  const data = await resp.json().catch(() => null);
+  if (!data) return new Error(NO_SERVER_MESSAGE);
+  return new Error(data.error || `Request failed (HTTP ${resp.status})`);
+}
+
+// Runs on page load: warns early when no server answers, and wakes a sleeping free-tier
+// server while the visitor is still typing.
+async function checkServer() {
+  try {
+    const resp = await fetch(`${API}/api/health`, { signal: AbortSignal.timeout(60000) });
+    const data = await resp.json().catch(() => null);
+    if (resp.ok && data && data.ok) return;
+    $('serverNotice').innerHTML = `<div class="notice notice-warn"><span><i class="ti ti-plug-connected-x" aria-hidden="true"></i> ${esc(NO_SERVER_MESSAGE)}</span></div>`;
+  } catch {
+    $('serverNotice').innerHTML = `<div class="notice notice-warn"><span><i class="ti ti-plug-connected-x" aria-hidden="true"></i> ${esc(errorMessage(new TypeError()))}</span></div>`;
+  }
+}
+
 function toast(message) {
   const el = document.createElement('div');
   el.className = 'toast';
@@ -201,7 +224,7 @@ async function doSearch(forceRefresh = false, { fromImage = false } = {}) {
       body: JSON.stringify({ query: q, forceRefresh }),
       signal: controller.signal
     });
-    if (!resp.ok) throw new Error((await resp.json().catch(() => ({}))).error || `Search failed (HTTP ${resp.status})`);
+    if (!resp.ok) throw await apiError(resp);
 
     // Show the series and direct site lookups as soon as they arrive; Gemini's ranked result comes last
     const partial = { results: [] };
@@ -576,8 +599,8 @@ async function searchByImage(file) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ image: dataUrl })
     });
-    const data = await resp.json().catch(() => ({}));
-    if (!resp.ok) throw new Error(data.error || `Image search failed (HTTP ${resp.status})`);
+    if (!resp.ok) throw await apiError(resp);
+    const data = await resp.json();
 
     const m = data.match;
     if (!m) {
@@ -783,7 +806,7 @@ async function importFromAniList() {
       body: JSON.stringify({ username: $('anilistUser').value.trim(), includeCompleted: $('anilistCompleted').checked }),
       signal: controller.signal
     });
-    if (!resp.ok) throw new Error((await resp.json().catch(() => ({}))).error || `Import failed (HTTP ${resp.status})`);
+    if (!resp.ok) throw await apiError(resp);
 
     for await (const event of readEvents(resp)) {
       if (event.type === 'progress') {
@@ -947,3 +970,4 @@ applyTheme(store.getTheme());
 renderHistory();
 updateBookmarkBadge();
 renderIntro();
+checkServer();
