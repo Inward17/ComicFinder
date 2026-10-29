@@ -3,7 +3,7 @@
 // All persistence goes through store.mjs (browser-local, one versioned key).
 // ============================================================
 
-import { store } from './store.mjs';
+import { store, toMalXml } from './store.mjs';
 
 // Server address from config.js; empty = same origin
 const API = (window.MANGAFINDER_API || '').replace(/\/$/, '');
@@ -572,22 +572,36 @@ function showImageNotice(dataUrl, html) {
   imageNotice.innerHTML = `<div class="notice image-notice"><img src="${esc(dataUrl)}" alt="Your image"><span>${html}</span></div>`;
 }
 
-async function searchByImage(file) {
+// Shows the chosen image and asks before anything is uploaded
+const imageDialog = $('imageDialog');
+let pendingImage = null;
+
+async function confirmImage(file) {
   if (!file || !/^image\/(jpeg|png|webp)$/.test(file.type)) {
     toast('Choose a JPEG, PNG or WebP image.');
     return;
   }
-  closeSuggestions();
-  switchView('search');
-  if (searchController) searchController.abort();
-
-  let dataUrl;
   try {
-    dataUrl = await imageToDataUrl(file);
+    pendingImage = await imageToDataUrl(file);
   } catch {
     toast("Couldn't read that image.");
     return;
   }
+  $('imagePreview').src = pendingImage;
+  imageDialog.showModal();
+}
+
+function confirmImageSearch() {
+  const dataUrl = pendingImage;
+  pendingImage = null;
+  imageDialog.close();
+  if (dataUrl) searchByImage(dataUrl);
+}
+
+async function searchByImage(dataUrl) {
+  closeSuggestions();
+  switchView('search');
+  if (searchController) searchController.abort();
 
   showImageNotice(dataUrl, `<span class="spinner"></span>Identifying your image…
     <span class="muted">Sent to Google Gemini (and SauceNAO, if set up) to identify it. Not stored.</span>`);
@@ -626,7 +640,7 @@ imageBtn.addEventListener('click', () => imageFile.click());
 imageFile.addEventListener('change', () => {
   const file = imageFile.files[0];
   imageFile.value = ''; // allow choosing the same image again
-  if (file) searchByImage(file);
+  if (file) confirmImage(file);
 });
 
 // Paste an image anywhere (including into the search box)
@@ -634,7 +648,7 @@ document.addEventListener('paste', e => {
   const file = [...((e.clipboardData && e.clipboardData.files) || [])].find(f => f.type.startsWith('image/'));
   if (!file) return;
   e.preventDefault();
-  searchByImage(file);
+  confirmImage(file);
 });
 
 // Drop an image anywhere on the page
@@ -652,7 +666,7 @@ document.addEventListener('drop', e => {
   const file = [...((e.dataTransfer && e.dataTransfer.files) || [])][0];
   if (!file) return;
   e.preventDefault();
-  searchByImage(file);
+  confirmImage(file);
 });
 
 // ============================================================
@@ -750,50 +764,88 @@ function renderBookmarks() {
   }).join('');
 }
 
-function exportWatchlist() {
-  const backup = store.exportBookmarks();
-  if (!backup.bookmarks.length) {
+function download(filename, text, type) {
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(new Blob([text], { type }));
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(link.href);
+}
+
+const importDialog = $('importDialog');
+const exportDialog = $('exportDialog');
+let anilistController = null;
+
+function openDialog(dialog) {
+  dialog.querySelector('.dialog-status').innerHTML = '';
+  dialog.showModal();
+}
+
+function openExport() {
+  if (!store.listBookmarks().length) {
     toast('Your watchlist is empty, nothing to export.');
     return;
   }
-  const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
-  const link = document.createElement('a');
-  link.href = URL.createObjectURL(blob);
-  link.download = `mangafinder-watchlist-${backup.exportedAt.slice(0, 10)}.json`;
-  link.click();
-  URL.revokeObjectURL(link.href);
-  toast(`Exported ${backup.bookmarks.length} series`);
+  openDialog(exportDialog);
+}
+
+function exportJson() {
+  const backup = store.exportBookmarks();
+  const filename = `mangafinder-watchlist-${backup.exportedAt.slice(0, 10)}.json`;
+  download(filename, JSON.stringify(backup, null, 2), 'application/json');
+  $('exportStatus').textContent = `Downloaded ${backup.bookmarks.length} series as ${filename}.`;
+}
+
+// AniList imports MyAnimeList's XML format, which identifies series by MyAnimeList ID
+async function exportAniList() {
+  const statusBox = $('exportStatus');
+  const btn = $('exportAniListBtn');
+  const bookmarks = store.listBookmarks();
+  btn.disabled = true;
+  statusBox.textContent = 'Looking up MyAnimeList entries…';
+
+  try {
+    const resp = await fetch(`${API}/api/export/mal-ids`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids: bookmarks.map(b => b.id) })
+    });
+    if (!resp.ok) throw await apiError(resp);
+    const { malIds } = await resp.json();
+    const missing = bookmarks.filter(b => !malIds[b.id]);
+    if (missing.length === bookmarks.length) {
+      statusBox.textContent = 'None of your series have a MyAnimeList entry, so there is nothing AniList can import.';
+      return;
+    }
+    download(`mangafinder-anilist-${new Date().toISOString().slice(0, 10)}.xml`, toMalXml(bookmarks, malIds), 'application/xml');
+    let html = `Downloaded ${bookmarks.length - missing.length} series. Upload the file on
+      <a href="https://anilist.co/settings/import" target="_blank" rel="noopener">AniList’s import page</a>.`;
+    if (missing.length) {
+      html += `<details><summary>${missing.length} left out (no MyAnimeList entry)</summary>
+        <ul>${missing.map(b => `<li>${esc(b.title)}</li>`).join('')}</ul></details>`;
+    }
+    statusBox.innerHTML = html;
+  } catch (err) {
+    statusBox.textContent = errorMessage(err);
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 async function importWatchlist(file) {
+  const statusBox = $('importStatus');
   try {
     const { added, skipped } = store.importBookmarks(JSON.parse(await file.text()));
     updateBookmarkBadge();
     renderBookmarks();
-    toast(`Imported ${added} series${skipped ? `, skipped ${skipped} already saved or invalid` : ''}`);
+    statusBox.textContent = `Imported ${added} series${skipped ? `, skipped ${skipped} already saved or invalid` : ''}.`;
   } catch (err) {
-    toast(err instanceof SyntaxError ? 'That file is not valid JSON.' : err.message);
+    statusBox.textContent = err instanceof SyntaxError ? 'That file is not valid JSON.' : err.message;
   }
 }
 
-const anilistDialog = $('anilistDialog');
-let anilistController = null;
-
-function openAniListImport() {
-  $('anilistStatus').innerHTML = '';
-  $('anilistClose').textContent = 'Cancel';
-  anilistDialog.showModal();
-  $('anilistUser').focus();
-}
-
-function closeAniListImport() {
-  if (anilistController) anilistController.abort();
-  anilistController = null;
-  anilistDialog.close();
-}
-
 async function importFromAniList() {
-  const statusBox = $('anilistStatus');
+  const statusBox = $('importStatus');
   const submit = $('anilistSubmit');
   const controller = anilistController = new AbortController();
   submit.disabled = true;
@@ -825,7 +877,6 @@ async function importFromAniList() {
             <ul>${notFound.map(t => `<li>${esc(t)}</li>`).join('')}</ul></details>`;
         }
         statusBox.innerHTML = html;
-        $('anilistClose').textContent = 'Close';
         return;
       }
     }
@@ -843,8 +894,8 @@ $('anilistForm').addEventListener('submit', e => {
   e.preventDefault();
   importFromAniList();
 });
-// Esc closes the dialog; stop an import that is still running
-anilistDialog.addEventListener('cancel', () => {
+// Done or Esc closes the dialog; stop an import that is still running
+importDialog.addEventListener('close', () => {
   if (anilistController) anilistController.abort();
 });
 
@@ -941,10 +992,13 @@ document.addEventListener('click', e => {
   else if (action === 'search') fillAndSearch(query);
   else if (action === 'clear-history') { store.clearHistory(); renderHistory(); }
   else if (action === 'go-search') { switchView('search'); inp.focus(); }
-  else if (action === 'export-watchlist') exportWatchlist();
-  else if (action === 'import-watchlist') $('importFile').click();
-  else if (action === 'open-anilist') openAniListImport();
-  else if (action === 'close-anilist') closeAniListImport();
+  else if (action === 'open-export') openExport();
+  else if (action === 'open-import') openDialog(importDialog);
+  else if (action === 'export-json') exportJson();
+  else if (action === 'export-anilist') exportAniList();
+  else if (action === 'choose-import-file') $('importFile').click();
+  else if (action === 'close-dialog') el.closest('dialog').close();
+  else if (action === 'image-search') confirmImageSearch();
 });
 
 resultsEl.addEventListener('change', e => {

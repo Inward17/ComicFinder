@@ -91,3 +91,16 @@ test('quota errors drop the search cache but keep bookmarks', () => {
   assert.ok(store.hasBookmark('keep'));
   assert.strictEqual(store.getCachedSearch('huge'), null);
 });
+
+test('AniList export is MyAnimeList XML with escaped titles and no unmatched series', async () => {
+  const { toMalXml } = await import('../public/store.mjs');
+  const xml = toMalXml(
+    [{ id: 'a', title: 'Kaguya-sama: <Love> & "War"' }, { id: 'b', title: 'No MAL entry' }],
+    { a: 90125 }
+  );
+  assert.match(xml, /^<\?xml version="1.0" encoding="UTF-8"\?>\n<myanimelist>/);
+  assert.match(xml, /<manga_mangadb_id>90125<\/manga_mangadb_id>/);
+  assert.match(xml, /<manga_title>Kaguya-sama: &#60;Love&#62; &#38; &#34;War&#34;<\/manga_title>/);
+  assert.match(xml, /<user_total_manga>1<\/user_total_manga>/);
+  assert.doesNotMatch(xml, /No MAL entry/);
+});

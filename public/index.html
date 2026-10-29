@@ -73,32 +73,73 @@
       </div>
       <div class="head-actions">
         <button id="checkAllBtn" class="btn btn-secondary"><i class="ti ti-refresh" aria-hidden="true"></i> Check for new chapters</button>
-        <button class="btn btn-secondary" data-action="export-watchlist"><i class="ti ti-download" aria-hidden="true"></i> Export</button>
-        <button class="btn btn-secondary" data-action="import-watchlist"><i class="ti ti-upload" aria-hidden="true"></i> Import</button>
-        <button class="btn btn-secondary" data-action="open-anilist"><i class="ti ti-users" aria-hidden="true"></i> From AniList</button>
-        <input type="file" id="importFile" accept="application/json,.json" hidden />
+        <button class="btn btn-secondary" data-action="open-export"><i class="ti ti-download" aria-hidden="true"></i> Export</button>
+        <button class="btn btn-secondary" data-action="open-import"><i class="ti ti-upload" aria-hidden="true"></i> Import</button>
       </div>
     </div>
-    <p class="muted import-hint"><i class="ti ti-info-circle" aria-hidden="true"></i> Import takes a <code>.json</code> file made with Export (<code>mangafinder-watchlist-YYYY-MM-DD.json</code>), for example from another browser or device. To bring in a list from AniList, use From AniList. Series you already have are kept.</p>
     <div id="bookmarksGrid" class="poster-grid"></div>
   </section>
 
 </main>
 
-<dialog id="anilistDialog" class="dialog" aria-labelledby="anilistTitle">
-  <form id="anilistForm">
-    <h3 id="anilistTitle">Import from AniList</h3>
-    <p class="muted">Your AniList manga list must be public. Each series is matched to MangaDex; any it doesn't have are listed after the import.</p>
-    <label class="field">AniList username
-      <input type="text" id="anilistUser" required pattern="[A-Za-z0-9_\-]{2,30}" autocomplete="username" autocapitalize="off" spellcheck="false" />
-    </label>
-    <label class="check"><input type="checkbox" id="anilistCompleted" /> Also import completed series</label>
-    <div id="anilistStatus" class="muted dialog-status" aria-live="polite"></div>
-    <div class="dialog-actions">
-      <button type="button" class="btn btn-secondary" data-action="close-anilist" id="anilistClose">Cancel</button>
-      <button type="submit" class="btn btn-primary" id="anilistSubmit">Import</button>
-    </div>
-  </form>
+<dialog id="importDialog" class="dialog" aria-labelledby="importTitle">
+  <h3 id="importTitle">Import to your watchlist</h3>
+  <p class="muted">Series you already have are kept.</p>
+
+  <section class="dialog-section">
+    <h4><i class="ti ti-file-text" aria-hidden="true"></i> MangaFinder backup</h4>
+    <p class="muted">A <code>.json</code> file made with Export, for example from another browser or device.</p>
+    <button type="button" class="btn btn-secondary btn-sm" data-action="choose-import-file"><i class="ti ti-folder-open" aria-hidden="true"></i> Choose file</button>
+    <input type="file" id="importFile" accept="application/json,.json" hidden />
+  </section>
+
+  <section class="dialog-section">
+    <h4><i class="ti ti-users" aria-hidden="true"></i> AniList</h4>
+    <form id="anilistForm">
+      <p class="muted">Your AniList manga list must be public. Each series is matched to MangaDex; any it doesn't have are listed after the import.</p>
+      <label class="field">AniList username
+        <input type="text" id="anilistUser" required pattern="[A-Za-z0-9_\-]{2,30}" autocomplete="username" autocapitalize="off" spellcheck="false" />
+      </label>
+      <label class="check"><input type="checkbox" id="anilistCompleted" /> Also import completed series</label>
+      <button type="submit" class="btn btn-secondary btn-sm" id="anilistSubmit"><i class="ti ti-download" aria-hidden="true"></i> Import from AniList</button>
+    </form>
+  </section>
+
+  <div id="importStatus" class="muted dialog-status" aria-live="polite"></div>
+  <div class="dialog-actions">
+    <button type="button" class="btn btn-primary" data-action="close-dialog">Done</button>
+  </div>
+</dialog>
+
+<dialog id="exportDialog" class="dialog" aria-labelledby="exportTitle">
+  <h3 id="exportTitle">Export your watchlist</h3>
+
+  <section class="dialog-section">
+    <h4><i class="ti ti-file-text" aria-hidden="true"></i> MangaFinder backup</h4>
+    <p class="muted">A <code>.json</code> file you can Import here on another browser or device.</p>
+    <button type="button" class="btn btn-secondary btn-sm" data-action="export-json"><i class="ti ti-download" aria-hidden="true"></i> Download backup</button>
+  </section>
+
+  <section class="dialog-section">
+    <h4><i class="ti ti-users" aria-hidden="true"></i> AniList</h4>
+    <p class="muted">A MyAnimeList-format <code>.xml</code> file. Upload it on <a href="https://anilist.co/settings/import" target="_blank" rel="noopener">AniList’s import page</a> under “Import manga list”. Series are added as Reading; AniList asks whether to overwrite ones already on your list. Series with no MyAnimeList entry can't be included.</p>
+    <button type="button" class="btn btn-secondary btn-sm" data-action="export-anilist" id="exportAniListBtn"><i class="ti ti-download" aria-hidden="true"></i> Download for AniList</button>
+  </section>
+
+  <div id="exportStatus" class="muted dialog-status" aria-live="polite"></div>
+  <div class="dialog-actions">
+    <button type="button" class="btn btn-primary" data-action="close-dialog">Done</button>
+  </div>
+</dialog>
+
+<dialog id="imageDialog" class="dialog" aria-labelledby="imageTitle">
+  <h3 id="imageTitle">Search with this image?</h3>
+  <img id="imagePreview" class="image-preview" alt="The image you chose" />
+  <p class="muted">It's sent to Google Gemini (and SauceNAO, if set up) to identify the series. Not stored.</p>
+  <div class="dialog-actions">
+    <button type="button" class="btn btn-secondary" data-action="close-dialog">Cancel</button>
+    <button type="button" class="btn btn-primary" data-action="image-search" autofocus><i class="ti ti-search" aria-hidden="true"></i> Search</button>
+  </div>
 </dialog>
 
 <div id="toasts" class="toasts" aria-live="polite"></div>

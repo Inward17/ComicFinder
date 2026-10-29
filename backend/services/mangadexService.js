@@ -233,9 +233,46 @@ async function findByExternalId({ anilistId, malId, titles }) {
   return null;
 }
 
+const MANGADEX_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const MAX_ID_LOOKUP = 500;
+
+/**
+ * MyAnimeList IDs for MangaDex series, read from MangaDex `links.mal` (100 per request).
+ * Series MangaDex has no MAL link for are left out.
+ * @param {unknown} ids MangaDex IDs
+ * @returns {Promise<Record<string, number>>}
+ */
+async function malIds(ids) {
+  if (!Array.isArray(ids) || !ids.length || ids.length > MAX_ID_LOOKUP || !ids.every(id => MANGADEX_ID_RE.test(id))) {
+    const err = new Error(`Send 1 to ${MAX_ID_LOOKUP} MangaDex IDs.`);
+    err.code = 'BAD_IDS';
+    throw err;
+  }
+  const result = {};
+  const unique = [...new Set(ids)];
+  for (let i = 0; i < unique.length; i += 100) {
+    const url = new URL('https://api.mangadex.org/manga');
+    url.searchParams.append('limit', '100');
+    for (const id of unique.slice(i, i + 100)) url.searchParams.append('ids[]', id);
+    for (const rating of ['safe', 'suggestive', 'erotica', 'pornographic']) url.searchParams.append('contentRating[]', rating);
+    const response = await fetch(url.toString(), {
+      headers: { 'User-Agent': 'MangaFinderBot/2.0' },
+      signal: AbortSignal.timeout(10000)
+    });
+    if (!response.ok) throw new Error(`MangaDex returned HTTP ${response.status}`);
+    const data = await response.json();
+    for (const m of data.data || []) {
+      const mal = Number((m.attributes.links || {}).mal);
+      if (Number.isInteger(mal) && mal > 0) result[m.id] = mal;
+    }
+  }
+  return result;
+}
+
 module.exports = {
   titleScore,
   searchManga,
   suggest,
-  findByExternalId
+  findByExternalId,
+  malIds
 };
