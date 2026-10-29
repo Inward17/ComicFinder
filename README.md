@@ -56,9 +56,29 @@ Open [http://localhost:3000](http://localhost:3000).
 | `npm test` | Run the test suite (`node --test`) |
 | `npm run check-sites` | Check that every aggregator site still works and report any that moved |
 
-### Continuous integration
+---
 
-GitHub Actions runs the tests, a frontend syntax check and a server smoke test on every push and pull request (Node 20 and 22). A separate workflow checks the aggregator sites every Monday; add `FIRECRAWL_API_KEY` as a repository secret to have Cloudflare-protected sites verified too.
+## 🚢 CI/CD and Hosting
+
+| Workflow | When | What |
+|---|---|---|
+| **CI** (`ci.yml`) | Every push and pull request | Tests on Node 20 and 22, frontend syntax check, server smoke test (pages, API validation, health check, CORS) |
+| **Deploy** (`deploy.yml`) | Every push to `main` | Runs the tests, then publishes the frontend to **GitHub Pages** only if they pass |
+| **Site check** (`site-check.yml`) | Mondays, or on demand | Checks every aggregator site still works; add `FIRECRAWL_API_KEY` as a repository secret to verify Cloudflare-protected ones |
+
+GitHub Pages only serves static files, so the app is hosted in two parts:
+
+- **Frontend** (`public/`) on GitHub Pages: `https://inward17.github.io/ComicFinder/`
+- **Backend** (the Node server that holds the API keys) on a Node host. A [Render](https://render.com) blueprint (`render.yaml`) is included; Render redeploys it on every push to `main`.
+
+### First-time setup
+
+1. **Backend:** on Render choose *New → Blueprint*, pick this repository, and enter `GEMINI_API_KEY` (plus `FIRECRAWL_API_KEY` / `SAUCENAO_API_KEY` if you use them) when asked. `ALLOWED_ORIGINS` and `TRUST_PROXY` are preset. Note the service URL, e.g. `https://mangafinder-api.onrender.com`. Opening `<url>/api/health` should show `{"ok":true}`.
+2. **Point the frontend at it:** in GitHub, *Settings → Secrets and variables → Actions → Variables*, add `API_BASE_URL` with that URL.
+3. **Pages:** *Settings → Pages → Source: GitHub Actions* (already enabled for this repository).
+4. Push to `main` (or run *Deploy* from the Actions tab). The site is live when the workflow finishes.
+
+On Render's free plan the server sleeps after about 15 minutes without traffic; the first search after that can take up to a minute while it wakes, and the page says so if it can't reach the server. Running `npm start` locally still serves the frontend and API together, with no extra setup.
 
 ---
 
@@ -71,6 +91,8 @@ GitHub Actions runs the tests, a frontend syntax check and a server smoke test o
 | `GEMINI_MODEL` | Optional | Gemini model used for search and image identification. Defaults to `gemini-2.5-flash`. Must support Google Search grounding; newer models (e.g. `gemini-3.5-flash`) may need billing enabled on your key. The model in use is printed when the server starts. |
 | `SAUCENAO_API_KEY` | Optional | [SauceNAO](https://saucenao.com) key (free account: 100 searches a day, 4 per 30 seconds). Makes image search exact for scanned manga pages and often finds the chapter. Without it, Gemini vision identifies images on its own. |
 | `PORT` | Optional | Server port. Defaults to `3000`. |
+| `ALLOWED_ORIGINS` | When hosting the frontend separately | Sites allowed to call the API, comma-separated (e.g. `https://inward17.github.io`). Not needed when the server also serves the page. |
+| `TRUST_PROXY` | When behind a host's proxy | Number of proxies in front of the server (`1` on Render), so rate limits see real visitor IPs. |
 
 ### Other AI providers
 
@@ -185,13 +207,15 @@ ComicFinder/
 │       └── cacheService.js       # 24h file cache for search results
 ├── public/
 │   ├── index.html
+│   ├── config.js                 # API server address (set by the Pages deploy)
 │   ├── script.js                 # UI: search, results, watchlist
 │   ├── store.mjs                 # Browser storage (watchlist, history, theme, cache)
 │   └── style.css
 ├── scripts/
 │   └── check-sites.js            # Aggregator site health check
 ├── test/                         # node:test suites
-├── .github/workflows/            # CI and the weekly site check
+├── .github/workflows/            # CI, Pages deploy (CD) and the weekly site check
+├── render.yaml                   # Render blueprint for the backend
 ├── .env.example
 └── package.json
 ```

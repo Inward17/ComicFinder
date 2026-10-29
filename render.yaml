@@ -1,0 +1,27 @@
+# Render blueprint for the MangaFinder API server (render.com → New → Blueprint → pick this repo).
+# The frontend lives on GitHub Pages; this runs the Node backend it calls.
+# Secrets marked sync: false are entered in the Render dashboard, never committed.
+services:
+  - type: web
+    name: mangafinder-api
+    runtime: node
+    plan: free # sleeps after ~15 min idle; the first request then takes up to a minute
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeploy: true # redeploys on every push to main
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: TRUST_PROXY
+        value: "1"
+      - key: ALLOWED_ORIGINS
+        value: https://inward17.github.io
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        sync: false
+      - key: FIRECRAWL_API_KEY
+        sync: false
+      - key: SAUCENAO_API_KEY
+        sync: false

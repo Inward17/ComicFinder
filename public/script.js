@@ -5,6 +5,9 @@
 
 import { store } from './store.mjs';
 
+// Server address from config.js; empty = same origin
+const API = (window.MANGAFINDER_API || '').replace(/\/$/, '');
+
 const $ = id => document.getElementById(id);
 const inp = $('inp');
 const themeBtn = $('themeBtn');
@@ -62,6 +65,14 @@ function hostOf(url) {
   } catch {
     return '';
   }
+}
+
+// A failed fetch (server down, asleep or unreachable) throws a bare TypeError; say what it means
+function errorMessage(err) {
+  if (err instanceof TypeError) {
+    return "Can't reach the MangaFinder server. If it was idle it may be starting up, so try again in a minute.";
+  }
+  return err.message || "Something went wrong. Check the console for details.";
 }
 
 function toast(message) {
@@ -184,7 +195,7 @@ async function doSearch(forceRefresh = false, { fromImage = false } = {}) {
 
   startLoading();
   try {
-    const resp = await fetch('/api/search/stream', {
+    const resp = await fetch(`${API}/api/search/stream`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ query: q, forceRefresh }),
@@ -219,7 +230,7 @@ async function doSearch(forceRefresh = false, { fromImage = false } = {}) {
     if (controller.signal.aborted) return; // superseded by a newer search
     console.error(err);
     stopLoading();
-    resultsEl.innerHTML = `<div class="empty"><i class="ti ti-alert-circle" aria-hidden="true"></i>${esc(err.message || 'Something went wrong. Check the console for details.')}</div>`;
+    resultsEl.innerHTML = `<div class="empty"><i class="ti ti-alert-circle" aria-hidden="true"></i>${esc(errorMessage(err))}</div>`;
   } finally {
     if (searchController === controller) searchController = null; // finished, nothing left to cancel
   }
@@ -464,7 +475,7 @@ async function loadSuggestions(q) {
   if (suggestController) suggestController.abort();
   const controller = suggestController = new AbortController();
   try {
-    const resp = await fetch(`/api/suggest?q=${encodeURIComponent(q)}`, { signal: controller.signal });
+    const resp = await fetch(`${API}/api/suggest?q=${encodeURIComponent(q)}`, { signal: controller.signal });
     if (!resp.ok) return;
     const data = await resp.json();
     // Ignore answers for text the user has since changed, or after they left the box
@@ -560,7 +571,7 @@ async function searchByImage(file) {
   imageBtn.disabled = true;
 
   try {
-    const resp = await fetch('/api/image-search', {
+    const resp = await fetch(`${API}/api/image-search`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ image: dataUrl })
@@ -582,7 +593,7 @@ async function searchByImage(file) {
     inp.value = m.title;
     doSearch(false, { fromImage: true });
   } catch (err) {
-    showImageNotice(dataUrl, `${esc(err.message)}`);
+    showImageNotice(dataUrl, esc(errorMessage(err)));
   } finally {
     imageBtn.disabled = false;
   }
@@ -766,7 +777,7 @@ async function importFromAniList() {
   statusBox.textContent = 'Reading your AniList list…';
 
   try {
-    const resp = await fetch('/api/import/anilist', {
+    const resp = await fetch(`${API}/api/import/anilist`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username: $('anilistUser').value.trim(), includeCompleted: $('anilistCompleted').checked }),
@@ -798,7 +809,7 @@ async function importFromAniList() {
     throw new Error('The import ended early. Please try again.');
   } catch (err) {
     if (controller.signal.aborted) return;
-    statusBox.textContent = err.message;
+    statusBox.textContent = errorMessage(err);
   } finally {
     submit.disabled = false;
     if (anilistController === controller) anilistController = null;
@@ -828,7 +839,7 @@ async function checkAllUpdates() {
     checkAllBtn.innerHTML = `<div class="spinner"></div> Checking ${i + 1} of ${bookmarks.length}…`;
 
     try {
-      const resp = await fetch('/api/search', {
+      const resp = await fetch(`${API}/api/search`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ query: b.title })

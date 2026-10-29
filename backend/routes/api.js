@@ -11,7 +11,7 @@ const RATE_WINDOW_MS = 60 * 1000;
 /**
  * Per-IP fixed-window rate limiter.
  * ponytail: in-memory, per-process; move to a shared store if running multiple instances.
- * Behind a reverse proxy, set app.set('trust proxy', ...) so req.ip is the client, not the proxy.
+ * Behind a reverse proxy, set TRUST_PROXY (see server.js) so req.ip is the visitor, not the proxy.
  * @param {number} maxRequests Allowed requests per IP per minute
  * @param {string} message Error shown when the limit is hit
  */
