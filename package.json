@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node backend/server.js",
     "dev": "node backend/server.js",
-    "test": "node --test"
+    "test": "node --test",
+    "check-sites": "node scripts/check-sites.js"
   },
   "repository": {
     "type": "git",
@@ -24,6 +25,9 @@
   "author": "Inward17",
   "license": "MIT",
   "type": "commonjs",
+  "engines": {
+    "node": ">=20"
+  },
   "bugs": {
     "url": "https://github.com/Inward17/ComicFinder/issues"
   },

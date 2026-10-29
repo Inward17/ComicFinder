@@ -57,15 +57,17 @@ function displayTitle(match, attrs) {
   return match.title && DISPLAY_LANGS.has(match.lang) ? match.title : canonical;
 }
 
+// Cover art thumbnail URL from the cover_art relationship, or null
+function coverUrlOf(manga) {
+  const coverRel = manga.relationships.find(r => r.type === 'cover_art');
+  return coverRel && coverRel.attributes && coverRel.attributes.fileName
+    ? `https://uploads.mangadex.org/covers/${manga.id}/${coverRel.attributes.fileName}.256.jpg`
+    : null;
+}
+
 function toMetadata(manga, match) {
   const attrs = manga.attributes;
-
-  // Extract Cover Art filename from relationships
-  let coverUrl = null;
-  const coverRel = manga.relationships.find(r => r.type === 'cover_art');
-  if (coverRel && coverRel.attributes && coverRel.attributes.fileName) {
-    coverUrl = `https://uploads.mangadex.org/covers/${manga.id}/${coverRel.attributes.fileName}.256.jpg`;
-  }
+  const coverUrl = coverUrlOf(manga);
 
   // Extract Author
   let author = 'Unknown Author';
@@ -154,7 +156,86 @@ async function searchManga(query) {
   }
 }
 
+const suggestCache = new Map();
+const SUGGEST_LIMIT = 8;
+const SUGGEST_CACHE_SIZE = 500;
+
+/**
+ * Title suggestions for autocomplete: most-followed MangaDex series matching the text, no fan works.
+ * @param {string} query Partial title as typed
+ * @returns {Promise<Array<{id: string, title: string, year: number|null, status: string, coverUrl: string|null}>>}
+ */
+async function suggest(query) {
+  const normalizedQuery = normalizeForMatch(query);
+  if (suggestCache.has(normalizedQuery)) return suggestCache.get(normalizedQuery);
+
+  const url = new URL('https://api.mangadex.org/manga');
+  url.searchParams.append('title', query.trim());
+  url.searchParams.append('limit', String(SUGGEST_LIMIT));
+  url.searchParams.append('includes[]', 'cover_art');
+  url.searchParams.append('order[followedCount]', 'desc');
+  url.searchParams.append('excludedTags[]', DOUJINSHI_TAG_ID);
+
+  const response = await fetch(url.toString(), {
+    headers: { 'User-Agent': 'MangaFinderBot/2.0' },
+    signal: AbortSignal.timeout(5000)
+  });
+  if (!response.ok) throw new Error(`MangaDex API error: ${response.status}`);
+  const data = await response.json();
+
+  // Titles that start with what was typed come first; the stable sort keeps follow-count order among equals
+  const suggestions = (data.data || [])
+    .map(manga => ({ manga, match: bestTitleMatch(normalizedQuery, manga.attributes) }))
+    .sort((a, b) => b.match.score - a.match.score)
+    .map(({ manga, match }) => ({
+      id: manga.id,
+      title: displayTitle(match, manga.attributes),
+      year: manga.attributes.year,
+      status: manga.attributes.status,
+      coverUrl: coverUrlOf(manga)
+    }));
+
+  // ponytail: evicts the oldest entry, not the least recently used; fine at this size
+  if (suggestCache.size >= SUGGEST_CACHE_SIZE) suggestCache.delete(suggestCache.keys().next().value);
+  suggestCache.set(normalizedQuery, suggestions);
+  return suggestions;
+}
+
+/**
+ * Finds the MangaDex entry for a series from another list site, verified by the external IDs
+ * MangaDex stores in `links` (al = AniList, mal = MyAnimeList). Title search only finds
+ * candidates; a candidate counts only if its stored ID matches, so there are no fuzzy mismatches.
+ * @param {{anilistId?: number|null, malId?: number|null, titles: string[]}} series
+ * @returns {Promise<{id: string, coverUrl: string|null}|null>}
+ */
+async function findByExternalId({ anilistId, malId, titles }) {
+  const al = anilistId ? String(anilistId) : null;
+  const mal = malId ? String(malId) : null;
+
+  for (const title of titles.filter(Boolean).slice(0, 2)) {
+    const url = new URL('https://api.mangadex.org/manga');
+    url.searchParams.append('title', title);
+    url.searchParams.append('limit', '10');
+    url.searchParams.append('includes[]', 'cover_art');
+    const response = await fetch(url.toString(), {
+      headers: { 'User-Agent': 'MangaFinderBot/2.0' },
+      signal: AbortSignal.timeout(8000)
+    });
+    if (response.status === 429) throw new Error('MangaDex rate limit reached');
+    if (!response.ok) continue;
+    const data = await response.json();
+    const hit = (data.data || []).find(m => {
+      const links = m.attributes.links || {};
+      return (al && links.al === al) || (mal && links.mal === mal);
+    });
+    if (hit) return { id: hit.id, coverUrl: coverUrlOf(hit) };
+  }
+  return null;
+}
+
 module.exports = {
   titleScore,
-  searchManga
+  searchManga,
+  suggest,
+  findByExternalId
 };

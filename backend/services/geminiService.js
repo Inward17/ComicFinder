@@ -6,14 +6,63 @@ const siteFamilyService = require('./siteFamilyService');
 // Built-in fetch is available in Node.js 18+
 
 const GEMINI_TIMEOUT_MS = 60 * 1000; // Grounded search routinely takes 10-30s
+// Any model that supports generateContent with Google Search grounding (and images, for image search).
+// Newer models may need a paid/billed key; the free tier reliably covers gemini-2.5-flash.
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+
+/**
+ * One Gemini generateContent call.
+ * @param {Object[]} parts Request content parts ({text} or {inline_data})
+ * @param {{search?: boolean}} [options] search: enable Google Search grounding
+ * @returns {Promise<{text: string, candidate: Object}>} Joined response text and the raw candidate
+ */
+async function generateContent(parts, { search = false } = {}) {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) throw new Error('GEMINI_API_KEY is not set in the environment');
+
+  let resp;
+  try {
+    resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(GEMINI_MODEL)}:generateContent`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
+      signal: AbortSignal.timeout(GEMINI_TIMEOUT_MS),
+      body: JSON.stringify({
+        contents: [{ parts }],
+        ...(search ? { tools: [{ googleSearch: {} }] } : {}),
+        generationConfig: { temperature: 0.2 }
+      })
+    });
+  } catch (err) {
+    const reason = err.name === 'TimeoutError' ? `did not answer within ${GEMINI_TIMEOUT_MS / 1000}s` : err.message;
+    throw new Error(`Gemini (${GEMINI_MODEL}) ${reason}`);
+  }
+
+  const data = await resp.json();
+  if (data.error) {
+    // Out of quota (the free tier allows only ~20 requests a day): say so plainly instead of Google's long text
+    if (data.error.code === 429 || data.error.status === 'RESOURCE_EXHAUSTED') {
+      const err = new Error(`The Gemini API limit for ${GEMINI_MODEL} is used up for now (the free tier allows about 20 requests a day). Try again later, or enable billing on your Gemini key.`);
+      err.code = 'GEMINI_QUOTA';
+      throw err;
+    }
+    throw new Error(`Gemini (${GEMINI_MODEL}): ${data.error.message}`);
+  }
+
+  // Grounded responses can be split across several parts; a safety block returns no content at all.
+  const candidate = data.candidates && data.candidates[0];
+  const text = ((candidate && candidate.content && candidate.content.parts) || []).map(p => p.text || '').join('');
+  if (!text) {
+    throw new Error(`Gemini returned no content${candidate && candidate.finishReason ? ` (${candidate.finishReason})` : ''}`);
+  }
+  return { text, candidate };
+}
 
 /**
  * Asks Gemini (with grounded Google Search) for candidate reading sites.
  * @param {string} searchTitle
- * @param {string} apiKey
  * @returns {Promise<Object[]>} Raw, unvalidated candidates
  */
-async function fetchGeminiCandidates(searchTitle, apiKey) {
+async function fetchGeminiCandidates(searchTitle) {
   const prompt = `You are a manga/manhwa reading assistant. Search the web to find the best working English reading sites for: "${searchTitle}".
 
   Return ONLY a JSON array of objects with these keys: title, site, url, language, free, official, status, chaptersAvailable, notes.
@@ -25,29 +74,8 @@ async function fetchGeminiCandidates(searchTitle, apiKey) {
 
   Do not include any introductory text or explanations.`;
 
-  const endpoint = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
-
-  const resp = await fetch(endpoint, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
-    signal: AbortSignal.timeout(GEMINI_TIMEOUT_MS),
-    body: JSON.stringify({
-      contents: [{ parts: [{ text: prompt }] }],
-      tools: [{ googleSearch: {} }],
-      generationConfig: { temperature: 0.2 }
-    })
-  });
-
-  const data = await resp.json();
-  if (data.error) throw new Error(data.error.message);
-
-  // Grounded responses can be split across several parts; a safety block returns no content at all.
-  const candidate = data.candidates && data.candidates[0];
-  const parts = (candidate && candidate.content && candidate.content.parts) || [];
-  let textResponse = parts.map(p => p.text || '').join('');
-  if (!textResponse) {
-    throw new Error(`Gemini returned no content${candidate && candidate.finishReason ? ` (${candidate.finishReason})` : ''}`);
-  }
+  const { text, candidate } = await generateContent([{ text: prompt }], { search: true });
+  let textResponse = text;
 
   // Extract JSON array
   const jsonStart = textResponse.indexOf('[');
@@ -83,16 +111,18 @@ function hostOf(url) {
  * Searches Gemini and known aggregator sites in parallel, then runs Gemini's links through the fallback chain
  * @param {string} query
  * @param {boolean} forceRefresh
+ * @param {(type: 'metadata'|'site', data: Object) => void} [onProgress] Called as partial results become
+ *   available, so callers can stream them (MangaDex and site lookups finish long before Gemini)
  */
-async function searchManga(query, forceRefresh = false) {
-  const API_KEY = process.env.GEMINI_API_KEY;
-  if (!API_KEY) {
+async function searchManga(query, forceRefresh = false, onProgress = () => {}) {
+  if (!process.env.GEMINI_API_KEY) {
     throw new Error('GEMINI_API_KEY is not set in the environment');
   }
 
   // Phase 2: Title Normalization via MangaDex
   const metadata = await mangadexService.searchManga(query);
   const searchTitle = metadata ? metadata.title : query;
+  onProgress('metadata', { query, searchTitle, metadata });
 
   // Phase 4: Backend Caching
   if (!forceRefresh) {
@@ -113,14 +143,14 @@ async function searchManga(query, forceRefresh = false) {
   // Validate Gemini candidates concurrently while the direct site lookups run
   const titles = siteFamilyService.candidateTitles(query, metadata);
   const [geminiOutcome, siteResults] = await Promise.all([
-    fetchGeminiCandidates(searchTitle, API_KEY)
+    fetchGeminiCandidates(searchTitle)
       .then(candidates => Promise.all(candidates.map(c => validateCandidate(c, titles))))
       .catch(err => ({ error: err })),
-    siteFamilyService.findOnSites(query, metadata)
+    siteFamilyService.findOnSites(query, metadata, result => onProgress('site', result))
   ]);
 
   if (geminiOutcome.error) {
-    console.error("Gemini Search Error:", geminiOutcome.error);
+    console.error("Gemini Search Error:", geminiOutcome.error.message);
     // Direct site lookups still give the user something when Gemini fails
     if (siteResults.length === 0) {
       throw new Error(geminiOutcome.error.message || 'Failed to search Gemini');
@@ -151,8 +181,9 @@ async function searchManga(query, forceRefresh = false) {
     finalResults = [...passingResults, ...siteResults];
   }
 
-  // Phase 4: Save to cache
-  await cacheService.setCache(searchTitle, finalResults);
+  // Phase 4: Save to cache. Not when Gemini failed: the results lack official sources,
+  // and caching them would hide those for a day after Gemini recovers.
+  if (!geminiOutcome.error) await cacheService.setCache(searchTitle, finalResults);
 
   return {
     success: true,
@@ -161,10 +192,16 @@ async function searchManga(query, forceRefresh = false) {
     metadata: metadata,
     results: finalResults,
     failedCandidates: failingResults,
-    fromCache: false
+    fromCache: false,
+    // Shown above the results when only the direct site lookups could run
+    warning: geminiOutcome.error
+      ? (geminiOutcome.error.code === 'GEMINI_QUOTA' ? geminiOutcome.error.message : 'Official sources could not be searched right now, so only direct site results are shown.')
+      : null
   };
 }
 
 module.exports = {
+  GEMINI_MODEL,
+  generateContent,
   searchManga
 };

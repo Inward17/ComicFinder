@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [20, 22]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - run: npm ci
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Frontend syntax check
+        # script.js is an ES module but the package is CommonJS, so check it under an .mjs name
+        run: |
+          for f in public/script.js public/store.mjs; do
+            cp "$f" "$RUNNER_TEMP/$(basename "${f%.*}").mjs"
+            node --check "$RUNNER_TEMP/$(basename "${f%.*}").mjs"
+          done
+
+      - name: Smoke test the server
+        run: |
+          PORT=3999 ALLOWED_ORIGINS=https://example.github.io node backend/server.js &
+          for i in $(seq 1 30); do curl -sf http://localhost:3999/ > /dev/null && break; sleep 0.5; done
+          check() { code=$(curl -s -o /dev/null -w '%{http_code}' "$@"); echo "$code $*"; [ "$code" = "$EXPECT" ]; }
+          EXPECT=200 check http://localhost:3999/
+          EXPECT=200 check http://localhost:3999/store.mjs
+          EXPECT=404 check http://localhost:3999/package.json
+          EXPECT=400 check -X POST -H 'Content-Type: application/json' -d '{}' http://localhost:3999/api/search
+          EXPECT=400 check -X POST -H 'Content-Type: application/json' -d '{}' http://localhost:3999/api/search/stream
+          EXPECT=200 check 'http://localhost:3999/api/suggest?q=x'
+          EXPECT=400 check -X POST -H 'Content-Type: application/json' -d '{"image":"nope"}' http://localhost:3999/api/image-search
+          EXPECT=200 check -X POST -H 'Content-Type: application/json' -d '{"username":"x"}' http://localhost:3999/api/import/anilist
+          EXPECT=200 check http://localhost:3999/api/health
+          # CORS: the allowed origin gets the header, any other origin does not
+          curl -s -o /dev/null -D - -X OPTIONS -H 'Origin: https://example.github.io' http://localhost:3999/api/search | grep -qi '^access-control-allow-origin: https://example.github.io'
+          ! curl -s -o /dev/null -D - -X OPTIONS -H 'Origin: https://evil.example' http://localhost:3999/api/search | grep -qi '^access-control-allow-origin'
+          echo "CORS ok"

@@ -1,0 +1,60 @@
+name: Deploy
+
+# CD: on every push to main, run the tests and, only if they pass, publish the frontend
+# (public/) to GitHub Pages. The backend is deployed by its host (see render.yaml).
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deploy at a time; don't cancel one that is already publishing
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Point the site at the API server
+        # Repository variable (Settings → Secrets and variables → Actions → Variables),
+        # e.g. https://mangafinder-api.onrender.com
+        env:
+          API_BASE_URL: ${{ vars.API_BASE_URL }}
+        run: |
+          if [ -z "$API_BASE_URL" ]; then
+            echo "::warning::The API_BASE_URL repository variable is not set, so the published site cannot reach a server."
+          fi
+          node -e 'console.log("window.MANGAFINDER_API = " + JSON.stringify(process.env.API_BASE_URL || "") + ";")' > public/config.js
+          cat public/config.js
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: public
+
+      - id: deployment
+        uses: actions/deploy-pages@v4

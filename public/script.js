@@ -5,9 +5,11 @@
 
 import { store } from './store.mjs';
 
+// Server address from config.js; empty = same origin
+const API = (window.MANGAFINDER_API || '').replace(/\/$/, '');
+
 const $ = id => document.getElementById(id);
 const inp = $('inp');
-const searchBtn = $('searchBtn');
 const themeBtn = $('themeBtn');
 const statusEl = $('status');
 const resultsEl = $('results');
@@ -18,18 +20,24 @@ const bookmarksView = $('bookmarksView');
 const bookmarksGrid = $('bookmarksGrid');
 const bookmarkCount = $('bookmarkCount');
 const checkAllBtn = $('checkAllBtn');
+const suggestEl = $('suggestions');
+const imageBtn = $('imageBtn');
+const imageFile = $('imageFile');
+const imageNotice = $('imageNotice');
 
 const SUGGESTIONS = ['Solo Leveling', 'One Piece', 'Omniscient Reader', 'Frieren'];
-const LOADING_STEPS = [
-  [0, 'Matching the title on MangaDex…'],
-  [2, 'Searching the web for reading sites…'],
-  [9, 'Checking every link and aggregator site…'],
-  [20, 'Still verifying pages, almost there…']
-];
+const SLOW_SEARCH_SECONDS = 20;
+const SUGGEST_MIN_LENGTH = 2;
+const SUGGEST_DELAY_MS = 200;
+const IMAGE_MAX_SIDE = 1280; // Downscaled in the browser before upload; plenty for recognition
 
 // Series shown in the current results, used when bookmarking it
 let currentSeries = null;
 let loadingTimer = null;
+let loadingStage = ''; // Status text, advanced by stream events
+// Arguments of the last renderResults call, so filters can re-render without searching again
+let lastRender = null;
+let searchController = null;
 
 // ============================================================
 // UTILITIES
@@ -57,6 +65,14 @@ function hostOf(url) {
   } catch {
     return '';
   }
+}
+
+// A failed fetch (server down, asleep or unreachable) throws a bare TypeError; say what it means
+function errorMessage(err) {
+  if (err instanceof TypeError) {
+    return "Can't reach the MangaFinder server. If it was idle it may be starting up, so try again in a minute.";
+  }
+  return err.message || "Something went wrong. Check the console for details.";
 }
 
 function toast(message) {
@@ -121,17 +137,19 @@ function fillAndSearch(q) {
 // ============================================================
 
 function startLoading() {
-  searchBtn.disabled = true;
+  // Find stays enabled: a new search cancels this one, and a disabled submit button would block Enter
   document.body.classList.add('searched');
   window.scrollTo({ top: 0 });
   resultsEl.innerHTML = Array.from({ length: 3 }, () =>
     `<div class="skeleton"><div class="bar wide"></div><div class="bar mid"></div><div class="bar short"></div></div>`
   ).join('');
 
+  loadingStage = 'Matching the title on MangaDex…';
+  clearInterval(loadingTimer);
   const started = Date.now();
   const tick = () => {
     const seconds = Math.floor((Date.now() - started) / 1000);
-    const step = LOADING_STEPS.filter(([at]) => seconds >= at).pop()[1];
+    const step = seconds >= SLOW_SEARCH_SECONDS ? 'Still verifying pages, almost there…' : loadingStage;
     statusEl.innerHTML = `<div class="spinner"></div><span>${esc(step)}</span><span class="elapsed">${seconds}s</span>`;
   };
   tick();
@@ -141,12 +159,27 @@ function startLoading() {
 function stopLoading() {
   clearInterval(loadingTimer);
   statusEl.innerHTML = '';
-  searchBtn.disabled = false;
 }
 
-async function doSearch(forceRefresh = false) {
+// Cancels a search that is still streaming. Its own error handler returns early on abort,
+// so the loading state (status timer) has to be cleared here.
+function cancelSearch() {
+  if (!searchController) return;
+  searchController.abort();
+  searchController = null;
+  stopLoading();
+}
+
+/**
+ * @param {boolean} [forceRefresh] Skip both caches
+ * @param {{fromImage?: boolean}} [options] fromImage: keep the "identified from your image" notice
+ */
+async function doSearch(forceRefresh = false, { fromImage = false } = {}) {
+  closeSuggestions();
+  if (!fromImage) imageNotice.innerHTML = '';
   const q = inp.value.trim();
   if (!q) return;
+  cancelSearch();
 
   if (!forceRefresh) {
     const cached = store.getCachedSearch(q);
@@ -158,26 +191,67 @@ async function doSearch(forceRefresh = false) {
     }
   }
 
+  const controller = searchController = new AbortController();
+
   startLoading();
   try {
-    const resp = await fetch('/api/search', {
+    const resp = await fetch(`${API}/api/search/stream`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query: q, forceRefresh })
+      body: JSON.stringify({ query: q, forceRefresh }),
+      signal: controller.signal
     });
-    const data = await resp.json();
-    if (data.error) throw new Error(data.error);
+    if (!resp.ok) throw new Error((await resp.json().catch(() => ({}))).error || `Search failed (HTTP ${resp.status})`);
 
-    store.cacheSearch(q, data);
-    stopLoading();
-    renderResults(data, q, data.fromCache);
-    store.addHistory(q);
-    renderHistory();
+    // Show the series and direct site lookups as soon as they arrive; Gemini's ranked result comes last
+    const partial = { results: [] };
+    for await (const event of readEvents(resp)) {
+      if (event.type === 'metadata') {
+        loadingStage = 'Searching official publishers and checking links…';
+        Object.assign(partial, event.data);
+        renderResults(partial, q, false, true);
+      } else if (event.type === 'site') {
+        partial.results = [...partial.results, event.data];
+        renderResults(partial, q, false, true);
+      } else if (event.type === 'error') {
+        throw new Error(event.data.message);
+      } else if (event.type === 'done') {
+        // Partial results (official sources unavailable) aren't worth keeping for a day
+        if (!event.data.warning) store.cacheSearch(q, event.data);
+        stopLoading();
+        renderResults(event.data, q, event.data.fromCache);
+        store.addHistory(q);
+        renderHistory();
+        return;
+      }
+    }
+    throw new Error('The search ended early. Please try again.');
   } catch (err) {
+    if (controller.signal.aborted) return; // superseded by a newer search
     console.error(err);
     stopLoading();
-    resultsEl.innerHTML = `<div class="empty"><i class="ti ti-alert-circle" aria-hidden="true"></i>${esc(err.message || 'Something went wrong. Check the console for details.')}</div>`;
+    resultsEl.innerHTML = `<div class="empty"><i class="ti ti-alert-circle" aria-hidden="true"></i>${esc(errorMessage(err))}</div>`;
+  } finally {
+    if (searchController === controller) searchController = null; // finished, nothing left to cancel
   }
+}
+
+/**
+ * Parses a newline-delimited JSON response body into events as chunks arrive.
+ * @param {Response} resp
+ */
+async function* readEvents(resp) {
+  const reader = resp.body.pipeThrough(new TextDecoderStream()).getReader();
+  let buffer = '';
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += value;
+    const lines = buffer.split('\n');
+    buffer = lines.pop();
+    for (const line of lines) if (line.trim()) yield JSON.parse(line);
+  }
+  if (buffer.trim()) yield JSON.parse(buffer);
 }
 
 // ============================================================
@@ -192,7 +266,14 @@ function renderIntro() {
     </div>`;
 }
 
-function renderResults(data, query, cached) {
+/**
+ * @param {Object} data /api/search result, or the partial one built while streaming
+ * @param {string} query
+ * @param {boolean} cached Show the "saved results" notice
+ * @param {boolean} [pending] Still streaming: official sources aren't in yet, so show a placeholder for them
+ */
+function renderResults(data, query, cached, pending = false) {
+  lastRender = [data, query, cached, pending];
   let html = '';
   // Compacts the hero on phones so results start near the top
   document.body.classList.add('searched');
@@ -204,12 +285,15 @@ function renderResults(data, query, cached) {
       <button data-action="refresh"><i class="ti ti-refresh" aria-hidden="true"></i> Refresh</button>
     </div>`;
   }
+  if (data.warning) {
+    html += `<div class="notice notice-warn"><span><i class="ti ti-alert-triangle" aria-hidden="true"></i> ${esc(data.warning)}</span></div>`;
+  }
 
   currentSeries = null;
   if (data.metadata) html += seriesCard(data);
 
   const results = data.results || [];
-  if (!results.length) {
+  if (!results.length && !pending) {
     html += `<div class="empty"><i class="ti ti-ghost" aria-hidden="true"></i>
       No verified reading sites for <strong>${esc(data.searchTitle || query)}</strong>.<br>
       <span class="muted">Try the Japanese/Korean name, or another title above.</span></div>`;
@@ -218,14 +302,32 @@ function renderResults(data, query, cached) {
   }
 
   const fallbackTitle = data.searchTitle || query;
-  const top = results[0].notes && results[0].notes.includes('Unverified') ? null : results[0];
+  const officialOnly = store.getOfficialOnly();
   const official = results.filter(r => r.official === true);
   const other = results.filter(r => r.official !== true);
+  const shown = officialOnly ? official : results;
+  // No "Top pick" until the final ranking is in
+  const top = !pending && shown[0] && !(shown[0].notes && shown[0].notes.includes('Unverified')) ? shown[0] : null;
 
-  if (official.length) {
+  html += `<div class="results-bar">
+    <span class="muted">${pending ? `${shown.length} found so far` : `${shown.length} of ${results.length} sources`}</span>
+    <label class="switch"><input type="checkbox" id="officialOnly" ${officialOnly ? 'checked' : ''}><span class="switch-track" aria-hidden="true"></span> Official only</label>
+  </div>`;
+
+  if (pending) {
+    html += `<section class="group">
+      <div class="group-head"><h2>Official</h2><span class="muted">Searching publishers and checking links…</span></div>
+      <div class="result-list"><div class="skeleton"><div class="bar wide"></div><div class="bar mid"></div><div class="bar short"></div></div></div>
+    </section>`;
+  } else if (official.length) {
     html += resultGroup('Official', 'Licensed publishers and platforms', official, top, fallbackTitle);
   }
-  if (other.length) {
+  if (officialOnly) {
+    if (!official.length && !pending) {
+      html += `<div class="empty"><i class="ti ti-shield-off" aria-hidden="true"></i>No official sources found for this title.<br>
+        <span class="muted">Turn off “Official only” to see ${other.length} other source${other.length === 1 ? '' : 's'}.</span></div>`;
+    }
+  } else if (other.length) {
     html += resultGroup('Other sources', 'Fan translations and aggregators, unofficial', other, top, fallbackTitle);
   }
   resultsEl.innerHTML = html;
@@ -328,6 +430,209 @@ function resultCard(s, isTop, fallbackTitle) {
 }
 
 // ============================================================
+// AUTOCOMPLETE
+// ============================================================
+
+let suggestions = [];
+let activeSuggestion = -1;
+let suggestTimer = null;
+let suggestController = null;
+
+function closeSuggestions() {
+  clearTimeout(suggestTimer);
+  if (suggestController) suggestController.abort();
+  suggestions = [];
+  activeSuggestion = -1;
+  suggestEl.hidden = true;
+  suggestEl.innerHTML = '';
+  inp.setAttribute('aria-expanded', 'false');
+  inp.removeAttribute('aria-activedescendant');
+}
+
+function renderSuggestions() {
+  if (!suggestions.length) {
+    closeSuggestions();
+    return;
+  }
+  suggestEl.innerHTML = suggestions.map((s, i) => {
+    const meta = [s.year, s.status && s.status[0].toUpperCase() + s.status.slice(1)].filter(Boolean).join(' · ');
+    return `<li class="suggestion" role="option" id="suggestion-${i}" data-index="${i}" aria-selected="${i === activeSuggestion}">
+      ${s.coverUrl ? `<img src="${esc(safeUrl(s.coverUrl))}" alt="" loading="lazy">` : '<span class="thumb"></span>'}
+      <span><span class="suggestion-title">${esc(s.title)}</span><br><span class="suggestion-meta">${esc(meta)}</span></span>
+    </li>`;
+  }).join('');
+  suggestEl.hidden = false;
+  inp.setAttribute('aria-expanded', 'true');
+  if (activeSuggestion >= 0) {
+    inp.setAttribute('aria-activedescendant', `suggestion-${activeSuggestion}`);
+    $(`suggestion-${activeSuggestion}`).scrollIntoView({ block: 'nearest' });
+  } else {
+    inp.removeAttribute('aria-activedescendant');
+  }
+}
+
+async function loadSuggestions(q) {
+  if (suggestController) suggestController.abort();
+  const controller = suggestController = new AbortController();
+  try {
+    const resp = await fetch(`${API}/api/suggest?q=${encodeURIComponent(q)}`, { signal: controller.signal });
+    if (!resp.ok) return;
+    const data = await resp.json();
+    // Ignore answers for text the user has since changed, or after they left the box
+    if (inp.value.trim() !== q || document.activeElement !== inp) return;
+    suggestions = data;
+    activeSuggestion = -1;
+    renderSuggestions();
+  } catch {
+    // Aborted or offline: just no suggestions
+  }
+}
+
+function chooseSuggestion(index) {
+  const s = suggestions[index];
+  if (!s) return;
+  inp.value = s.title;
+  doSearch();
+}
+
+inp.addEventListener('input', () => {
+  clearTimeout(suggestTimer);
+  const q = inp.value.trim();
+  if (q.length < SUGGEST_MIN_LENGTH) {
+    closeSuggestions();
+    return;
+  }
+  suggestTimer = setTimeout(() => loadSuggestions(q), SUGGEST_DELAY_MS);
+});
+
+inp.addEventListener('keydown', e => {
+  if (suggestEl.hidden) return;
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    const n = suggestions.length;
+    activeSuggestion = e.key === 'ArrowDown' ? (activeSuggestion + 1) % n : (activeSuggestion - 1 + n) % n;
+    renderSuggestions();
+  } else if (e.key === 'Enter' && activeSuggestion >= 0) {
+    e.preventDefault();
+    chooseSuggestion(activeSuggestion);
+  } else if (e.key === 'Escape') {
+    closeSuggestions();
+  }
+});
+
+// mousedown rather than click, so the input doesn't blur (and close the list) before the choice registers
+suggestEl.addEventListener('mousedown', e => {
+  const item = e.target.closest('.suggestion');
+  if (!item) return;
+  e.preventDefault();
+  chooseSuggestion(Number(item.dataset.index));
+});
+inp.addEventListener('blur', closeSuggestions);
+
+// ============================================================
+// IMAGE SEARCH
+// ============================================================
+
+// Re-encodes as a downscaled JPEG: smaller upload, and strips metadata such as photo location
+async function imageToDataUrl(file) {
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(1, IMAGE_MAX_SIDE / Math.max(bitmap.width, bitmap.height));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(bitmap.width * scale);
+  canvas.height = Math.round(bitmap.height * scale);
+  canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  bitmap.close();
+  return canvas.toDataURL('image/jpeg', 0.85);
+}
+
+function showImageNotice(dataUrl, html) {
+  imageNotice.innerHTML = `<div class="notice image-notice"><img src="${esc(dataUrl)}" alt="Your image"><span>${html}</span></div>`;
+}
+
+async function searchByImage(file) {
+  if (!file || !/^image\/(jpeg|png|webp)$/.test(file.type)) {
+    toast('Choose a JPEG, PNG or WebP image.');
+    return;
+  }
+  closeSuggestions();
+  switchView('search');
+  if (searchController) searchController.abort();
+
+  let dataUrl;
+  try {
+    dataUrl = await imageToDataUrl(file);
+  } catch {
+    toast("Couldn't read that image.");
+    return;
+  }
+
+  showImageNotice(dataUrl, `<span class="spinner"></span>Identifying your image…
+    <span class="muted">Sent to Google Gemini (and SauceNAO, if set up) to identify it. Not stored.</span>`);
+  imageBtn.disabled = true;
+
+  try {
+    const resp = await fetch(`${API}/api/image-search`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image: dataUrl })
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.error || `Image search failed (HTTP ${resp.status})`);
+
+    const m = data.match;
+    if (!m) {
+      const guess = data.guess ? ` Gemini guessed “${esc(data.guess)}”, but no series by that name exists.` : '';
+      showImageNotice(dataUrl, `Couldn't identify this image.
+        <span class="muted">${guess} Try a clearer page, a cover, or type the title instead.</span>`);
+      return;
+    }
+
+    const via = m.source === 'saucenao' ? 'SauceNAO' : 'Gemini';
+    const details = [m.chapter ? `chapter ${m.chapter}` : '', `via ${via}`, m.confidence].filter(Boolean).join(' · ');
+    showImageNotice(dataUrl, `Looks like <strong>${esc(m.title)}</strong> <span class="muted">${esc(details)}${m.reason ? ` — ${esc(m.reason)}` : ''}</span>`);
+    inp.value = m.title;
+    doSearch(false, { fromImage: true });
+  } catch (err) {
+    showImageNotice(dataUrl, esc(errorMessage(err)));
+  } finally {
+    imageBtn.disabled = false;
+  }
+}
+
+imageBtn.addEventListener('click', () => imageFile.click());
+imageFile.addEventListener('change', () => {
+  const file = imageFile.files[0];
+  imageFile.value = ''; // allow choosing the same image again
+  if (file) searchByImage(file);
+});
+
+// Paste an image anywhere (including into the search box)
+document.addEventListener('paste', e => {
+  const file = [...((e.clipboardData && e.clipboardData.files) || [])].find(f => f.type.startsWith('image/'));
+  if (!file) return;
+  e.preventDefault();
+  searchByImage(file);
+});
+
+// Drop an image anywhere on the page
+const hero = document.querySelector('.hero');
+document.addEventListener('dragover', e => {
+  if (!e.dataTransfer || ![...e.dataTransfer.types].includes('Files')) return;
+  e.preventDefault();
+  hero.classList.add('dragging');
+});
+document.addEventListener('dragleave', e => {
+  if (!e.relatedTarget) hero.classList.remove('dragging'); // left the window
+});
+document.addEventListener('drop', e => {
+  hero.classList.remove('dragging');
+  const file = [...((e.dataTransfer && e.dataTransfer.files) || [])][0];
+  if (!file) return;
+  e.preventDefault();
+  searchByImage(file);
+});
+
+// ============================================================
 // HISTORY
 // ============================================================
 
@@ -422,6 +727,104 @@ function renderBookmarks() {
   }).join('');
 }
 
+function exportWatchlist() {
+  const backup = store.exportBookmarks();
+  if (!backup.bookmarks.length) {
+    toast('Your watchlist is empty, nothing to export.');
+    return;
+  }
+  const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = `mangafinder-watchlist-${backup.exportedAt.slice(0, 10)}.json`;
+  link.click();
+  URL.revokeObjectURL(link.href);
+  toast(`Exported ${backup.bookmarks.length} series`);
+}
+
+async function importWatchlist(file) {
+  try {
+    const { added, skipped } = store.importBookmarks(JSON.parse(await file.text()));
+    updateBookmarkBadge();
+    renderBookmarks();
+    toast(`Imported ${added} series${skipped ? `, skipped ${skipped} already saved or invalid` : ''}`);
+  } catch (err) {
+    toast(err instanceof SyntaxError ? 'That file is not valid JSON.' : err.message);
+  }
+}
+
+const anilistDialog = $('anilistDialog');
+let anilistController = null;
+
+function openAniListImport() {
+  $('anilistStatus').innerHTML = '';
+  $('anilistClose').textContent = 'Cancel';
+  anilistDialog.showModal();
+  $('anilistUser').focus();
+}
+
+function closeAniListImport() {
+  if (anilistController) anilistController.abort();
+  anilistController = null;
+  anilistDialog.close();
+}
+
+async function importFromAniList() {
+  const statusBox = $('anilistStatus');
+  const submit = $('anilistSubmit');
+  const controller = anilistController = new AbortController();
+  submit.disabled = true;
+  statusBox.textContent = 'Reading your AniList list…';
+
+  try {
+    const resp = await fetch(`${API}/api/import/anilist`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: $('anilistUser').value.trim(), includeCompleted: $('anilistCompleted').checked }),
+      signal: controller.signal
+    });
+    if (!resp.ok) throw new Error((await resp.json().catch(() => ({}))).error || `Import failed (HTTP ${resp.status})`);
+
+    for await (const event of readEvents(resp)) {
+      if (event.type === 'progress') {
+        statusBox.textContent = `Matching ${event.data.done} of ${event.data.total} on MangaDex…`;
+      } else if (event.type === 'error') {
+        throw new Error(event.data.message);
+      } else if (event.type === 'done') {
+        const { bookmarks, notFound, truncated } = event.data;
+        const { added, skipped } = store.importBookmarks(bookmarks);
+        updateBookmarkBadge();
+        renderBookmarks();
+        let html = `Added ${added} series${skipped ? `, ${skipped} already in your watchlist` : ''}.`;
+        if (truncated) html += ' Only the first 300 series were imported.';
+        if (notFound.length) {
+          html += `<details><summary>${notFound.length} not found on MangaDex</summary>
+            <ul>${notFound.map(t => `<li>${esc(t)}</li>`).join('')}</ul></details>`;
+        }
+        statusBox.innerHTML = html;
+        $('anilistClose').textContent = 'Close';
+        return;
+      }
+    }
+    throw new Error('The import ended early. Please try again.');
+  } catch (err) {
+    if (controller.signal.aborted) return;
+    statusBox.textContent = errorMessage(err);
+  } finally {
+    submit.disabled = false;
+    if (anilistController === controller) anilistController = null;
+  }
+}
+
+$('anilistForm').addEventListener('submit', e => {
+  e.preventDefault();
+  importFromAniList();
+});
+// Esc closes the dialog; stop an import that is still running
+anilistDialog.addEventListener('cancel', () => {
+  if (anilistController) anilistController.abort();
+});
+
 async function checkAllUpdates() {
   const bookmarks = store.listBookmarks();
   if (!bookmarks.length) return;
@@ -436,7 +839,7 @@ async function checkAllUpdates() {
     checkAllBtn.innerHTML = `<div class="spinner"></div> Checking ${i + 1} of ${bookmarks.length}…`;
 
     try {
-      const resp = await fetch('/api/search', {
+      const resp = await fetch(`${API}/api/search`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ query: b.title })
@@ -515,6 +918,25 @@ document.addEventListener('click', e => {
   else if (action === 'search') fillAndSearch(query);
   else if (action === 'clear-history') { store.clearHistory(); renderHistory(); }
   else if (action === 'go-search') { switchView('search'); inp.focus(); }
+  else if (action === 'export-watchlist') exportWatchlist();
+  else if (action === 'import-watchlist') $('importFile').click();
+  else if (action === 'open-anilist') openAniListImport();
+  else if (action === 'close-anilist') closeAniListImport();
+});
+
+resultsEl.addEventListener('change', e => {
+  if (e.target.id !== 'officialOnly' || !lastRender) return;
+  store.setOfficialOnly(e.target.checked);
+  const y = window.scrollY;
+  renderResults(...lastRender);
+  window.scrollTo({ top: y });
+  $('officialOnly').focus();
+});
+
+$('importFile').addEventListener('change', e => {
+  const file = e.target.files[0];
+  e.target.value = ''; // allow re-importing the same file
+  if (file) importWatchlist(file);
 });
 
 // ============================================================

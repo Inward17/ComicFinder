@@ -16,6 +16,7 @@ const firecrawlService = require('./firecrawlService');
 const SITE_FAMILIES = [
   {
     family: 'mangakakalot',
+    probeSlug: 'one-piece', // A series every site carries, for `npm run check-sites`
     seriesPath: '/manga/{slug}',
     searchPath: '/search/story/{query}',
     sites: [
@@ -203,9 +204,11 @@ async function lookupSite(site, family, slugs, searchSlugs, title) {
  * Looks the title up on every configured site in parallel.
  * @param {string} query What the user typed
  * @param {Object|null} metadata MangaDex metadata
+ * @param {(result: Object) => void} [onFound] Called for each site as soon as it is found
+ *   (free lookups answer in under a second; Firecrawl ones take several)
  * @returns {Promise<Object[]>} Results in the same shape as validated Gemini candidates
  */
-async function findOnSites(query, metadata) {
+async function findOnSites(query, metadata, onFound = () => {}) {
   const titles = candidateTitles(query, metadata);
   const slugs = [...new Set(titles.map(slugify).filter(Boolean))].slice(0, MAX_SLUG_GUESSES);
   if (!slugs.length) return [];
@@ -215,7 +218,10 @@ async function findOnSites(query, metadata) {
   const searchSlugs = [...new Set([query, metadata && metadata.canonicalTitle].filter(Boolean).map(slugify))].slice(0, 2);
   const searchTitle = metadata ? metadata.title : query;
   const lookups = SITE_FAMILIES.flatMap(family =>
-    family.sites.map(site => lookupSite(site, family, slugs, searchSlugs, searchTitle))
+    family.sites.map(site => lookupSite(site, family, slugs, searchSlugs, searchTitle).then(result => {
+      if (result) onFound(result);
+      return result;
+    }))
   );
   return (await Promise.all(lookups)).filter(Boolean);
 }

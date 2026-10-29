@@ -24,7 +24,7 @@
 
 <header class="topbar">
   <div class="topbar-inner">
-    <a class="brand" href="/" aria-label="MangaFinder Pro home">MANGA<span>FINDER</span></a>
+    <a class="brand" href="./" aria-label="MangaFinder Pro home">MANGA<span>FINDER</span></a>
     <nav class="tabs" aria-label="Views">
       <button class="tab active" id="tabSearch" aria-current="page"><i class="ti ti-search" aria-hidden="true"></i> Search</button>
       <button class="tab" id="tabBookmarks">
@@ -41,12 +41,16 @@
   <section id="searchView">
     <div class="hero">
       <h1>Find where to read it.</h1>
-      <p>Official sites first, every link checked. Manga, manhwa and manhua.</p>
+      <p>Official sites first, every link checked. Search by title, or drop in a page, panel or cover.</p>
       <form class="search" id="searchForm" role="search">
         <i class="ti ti-search search-icon" aria-hidden="true"></i>
-        <input type="search" id="inp" placeholder="Search a title, e.g. Solo Leveling" autocomplete="off" autocapitalize="off" enterkeyhint="search" aria-label="Manga title" maxlength="200" />
+        <input type="search" id="inp" placeholder="Search a title, e.g. Solo Leveling" autocomplete="off" autocapitalize="off" enterkeyhint="search" aria-label="Manga title" maxlength="200"
+          role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="suggestions" />
         <kbd class="search-kbd" aria-hidden="true">/</kbd>
+        <button type="button" class="image-btn" id="imageBtn" aria-label="Search by image" title="Search by image (you can also paste or drop one)"><i class="ti ti-photo-search" aria-hidden="true"></i></button>
+        <input type="file" id="imageFile" accept="image/jpeg,image/png,image/webp" hidden />
         <button type="submit" id="searchBtn">Find</button>
+        <ul id="suggestions" class="suggestions" role="listbox" aria-label="Title suggestions" hidden></ul>
       </form>
       <div class="history" id="historySection" hidden>
         <span class="history-label">Recent</span>
@@ -56,6 +60,7 @@
     </div>
 
     <div id="status" class="status" role="status" aria-live="polite"></div>
+    <div id="imageNotice" aria-live="polite"></div>
     <div id="results"></div>
   </section>
 
@@ -65,15 +70,39 @@
         <h2>Watchlist</h2>
         <p class="muted">Saved in this browser only. No account needed.</p>
       </div>
-      <button id="checkAllBtn" class="btn btn-secondary"><i class="ti ti-refresh" aria-hidden="true"></i> Check for new chapters</button>
+      <div class="head-actions">
+        <button id="checkAllBtn" class="btn btn-secondary"><i class="ti ti-refresh" aria-hidden="true"></i> Check for new chapters</button>
+        <button class="btn btn-secondary" data-action="export-watchlist"><i class="ti ti-download" aria-hidden="true"></i> Export</button>
+        <button class="btn btn-secondary" data-action="import-watchlist"><i class="ti ti-upload" aria-hidden="true"></i> Import</button>
+        <button class="btn btn-secondary" data-action="open-anilist"><i class="ti ti-users" aria-hidden="true"></i> From AniList</button>
+        <input type="file" id="importFile" accept="application/json,.json" hidden />
+      </div>
     </div>
+    <p class="muted import-hint"><i class="ti ti-info-circle" aria-hidden="true"></i> Import takes a <code>.json</code> file made with Export (<code>mangafinder-watchlist-YYYY-MM-DD.json</code>), for example from another browser or device. To bring in a list from AniList, use From AniList. Series you already have are kept.</p>
     <div id="bookmarksGrid" class="poster-grid"></div>
   </section>
 
 </main>
 
+<dialog id="anilistDialog" class="dialog" aria-labelledby="anilistTitle">
+  <form id="anilistForm">
+    <h3 id="anilistTitle">Import from AniList</h3>
+    <p class="muted">Your AniList manga list must be public. Each series is matched to MangaDex; any it doesn't have are listed after the import.</p>
+    <label class="field">AniList username
+      <input type="text" id="anilistUser" required pattern="[A-Za-z0-9_\-]{2,30}" autocomplete="username" autocapitalize="off" spellcheck="false" />
+    </label>
+    <label class="check"><input type="checkbox" id="anilistCompleted" /> Also import completed series</label>
+    <div id="anilistStatus" class="muted dialog-status" aria-live="polite"></div>
+    <div class="dialog-actions">
+      <button type="button" class="btn btn-secondary" data-action="close-anilist" id="anilistClose">Cancel</button>
+      <button type="submit" class="btn btn-primary" id="anilistSubmit">Import</button>
+    </div>
+  </form>
+</dialog>
+
 <div id="toasts" class="toasts" aria-live="polite"></div>
 
+<script src="config.js"></script>
 <script type="module" src="script.js"></script>
 </body>
 </html>
